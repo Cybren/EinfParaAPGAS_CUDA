@@ -1,9 +1,11 @@
-package src;
-
 import java.util.Locale;
 import java.util.Random;
 
-public class Squares{
+public class Squares {
+
+    private static long[] primes;
+    private static int maxPrimePos;
+
     public static void main(String[] args) {
         Locale.setDefault(Locale.ENGLISH);
 
@@ -15,8 +17,11 @@ public class Squares{
         int verbose = Integer.parseInt(args[5]);
 
         int[][][] a = new int[n][n][n];
-        int[][] zValue = new int[n][n];
+        int[][] zValue = new int[n][n]; // long
         double[][] meanValue = new double[n][n];
+
+        primes = new long[m + 1];
+        maxPrimePos = 0;
 
         int min;
         int max;
@@ -83,11 +88,17 @@ public class Squares{
                 }
             }
 
+            // resize primes-Array for next iteration
+            int len = m + 1 + (int) ((n * primes[maxPrimePos]) / 50);
+            long[] temp = new long[len];
+            System.arraycopy(primes, 0, temp, 0, primes.length);
+            primes = temp;
+
             // output of meanValue - matrix
             if (verbose == 1) {
                 for (int x = 0; x < n; x++) {
                     for (int y = 0; y < n; y++) {
-                        System.out.print(String.format("%.2f%c ", meanValue[x][y], (y < n-1 ? ',' : ' ')));
+                        System.out.print(String.format("%.2f%c ", meanValue[x][y], (y < n - 1 ? ',' : ' ')));
                     }
                     System.out.println();
                 }
@@ -106,7 +117,40 @@ public class Squares{
         System.out.println("Process time=" + ((end - start) / 1E9D) + " sec");
     }
 
+    // with saving prime numbers
     public static long findPrimeNumber(int x) {
+        if (x <= maxPrimePos) {
+            return primes[x];
+        }
+        int count = maxPrimePos;
+        long a;
+        if (maxPrimePos == 0) {
+            a = 2;
+        } else {
+            a = primes[maxPrimePos] + 1;
+        }
+        while (count < x) {
+            long b = 2;
+            int prime = 1;  // to check if found a prime
+            while (b * b <= a) {
+                if (a % b == 0) {
+                    prime = 0;
+                    break;
+                }
+                b++;
+            }
+            if (prime > 0) {
+                count++;
+                primes[count] = a;
+                maxPrimePos++;
+            }
+            a++;
+        }
+        return (--a);
+    }
+
+    // without saving prime numbers
+    /*public static long findPrimeNumber(int x) {
         int count = 0;
         long a = 2;
         while (count < x) {
@@ -125,5 +169,5 @@ public class Squares{
             a++;
         }
         return (--a);
-    }
+    }*/
 }
