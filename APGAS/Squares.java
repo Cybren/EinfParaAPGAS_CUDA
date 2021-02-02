@@ -1,10 +1,12 @@
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Random;
 
 public class Squares {
 
-    private static long[] primes;
+    //private static long[] primes;
     private static int maxPrimePos;
+    private static ArrayList<Long> primes;
 
     public static void main(String[] args) {
         Locale.setDefault(Locale.ENGLISH);
@@ -17,16 +19,18 @@ public class Squares {
         int verbose = Integer.parseInt(args[5]);
 
         int[][][] a = new int[n][n][n];
-        int[][] zValue = new int[n][n]; // long
+        long[][] zValue = new long[n][n];
         double[][] meanValue = new double[n][n];
 
-        primes = new long[m + 1];
+        //primes = new long[m + 1];
+        primes = new ArrayList<>();
         maxPrimePos = 0;
 
         int min;
         int max;
-        int[] minPos = new int[3];
-        int[] maxPos = new int[3];
+        ArrayList<ArrayList<Integer>> minPos = new ArrayList<>();
+        ArrayList<ArrayList<Integer>> maxPos = new ArrayList<>();
+        //int[] maxPos = new int[3];
 
         Random random = new Random();
 
@@ -50,7 +54,7 @@ public class Squares {
             // compute zValue
             for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
-                    zValue[x][y] = 0;
+                    //zValue[x][y] = 0;
                     for (int j = 0; j < n; j++) {
                         zValue[x][y] += findPrimeNumber(a[x][y][j]);
                     }
@@ -89,16 +93,16 @@ public class Squares {
             }
 
             // resize primes-Array for next iteration
-            int len = m + 1 + (int) ((n * primes[maxPrimePos]) / 50);
+            /*int len = m + 1 + (int) ((n * primes[maxPrimePos]) / 50);
             long[] temp = new long[len];
             System.arraycopy(primes, 0, temp, 0, primes.length);
-            primes = temp;
+            primes = temp;*/
 
             // output of meanValue - matrix
             if (verbose == 1) {
                 for (int x = 0; x < n; x++) {
                     for (int y = 0; y < n; y++) {
-                        System.out.print(String.format("%.2f%c ", meanValue[x][y], (y < n - 1 ? ',' : ' ')));
+                        System.out.printf("%.2f%c ", meanValue[x][y], (y < n - 1 ? ',' : ' '));
                     }
                     System.out.println();
                 }
@@ -110,7 +114,46 @@ public class Squares {
             }
         }
 
-        // To Do: compute min- and max-value of a and output them
+        // To Do: compute min- and max-value and positions in a and output them
+
+        //min = (int) primes[maxPrimePos] + 1;
+        min = (int) (primes.get(maxPrimePos) + 1);
+        max = 0;
+        for (int x = 0; x < n; x++) {
+            for (int y = 0; y < n; y++) {
+                for (int z = 0; z < n; z++) {
+                    if (a[x][y][z] <= min) {
+                        if (a[x][y][z] < min) {
+                            minPos.clear();
+                        }
+                        min = a[x][y][z];
+                        ArrayList<Integer> newMinPos = new ArrayList<>();
+                        newMinPos.add(x);
+                        newMinPos.add(y);
+                        newMinPos.add(z);
+                        minPos.add(newMinPos);
+                    }
+                    if (a[x][y][z] >= max) {
+                        if (a[x][y][z] > max) {
+                            maxPos.clear();
+                        }
+                        max = a[x][y][z];
+                        ArrayList<Integer> newMaxPos = new ArrayList<>();
+                        newMaxPos.add(x);
+                        newMaxPos.add(y);
+                        newMaxPos.add(z);
+                        maxPos.add(newMaxPos);
+                    }
+                }
+            }
+        }
+
+        System.out.println("Min=" + min + " " + minPos);
+        System.out.println("Max=" + max + " " + maxPos);
+
+        /*System.out.println(String.format("Min=%d (%d,%d,%d)", min, minPos[0], minPos[1], minPos[2]));
+        System.out.println(String.format("Max=%d (%d,%d,%d)", max, maxPos[0], maxPos[1], maxPos[2]));*/
+
 
         long end = System.nanoTime();
 
@@ -118,7 +161,7 @@ public class Squares {
     }
 
     // with saving prime numbers
-    public static long findPrimeNumber(int x) {
+    /*public static long findPrimeNumber(int x) {
         if (x <= maxPrimePos) {
             return primes[x];
         }
@@ -142,6 +185,39 @@ public class Squares {
             if (prime > 0) {
                 count++;
                 primes[count] = a;
+                maxPrimePos++;
+            }
+            a++;
+        }
+        return (--a);
+    }*/
+
+    // with ArrayList
+    public static long findPrimeNumber(int x) {
+        if (x <= maxPrimePos) {
+            return primes.get(x);
+        }
+        int count = maxPrimePos;
+        long a;
+        if (maxPrimePos == 0) {
+            a = 2;
+            primes.add(0,0l);
+        } else {
+            a = primes.get(maxPrimePos) + 1;
+        }
+        while (count < x) {
+            long b = 2;
+            int prime = 1;  // to check if found a prime
+            while (b * b <= a) {
+                if (a % b == 0) {
+                    prime = 0;
+                    break;
+                }
+                b++;
+            }
+            if (prime > 0) {
+                count++;
+                primes.add(count,a);//set(count,a);
                 maxPrimePos++;
             }
             a++;
