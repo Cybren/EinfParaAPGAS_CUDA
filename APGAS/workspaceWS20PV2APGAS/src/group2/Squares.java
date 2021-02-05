@@ -7,6 +7,7 @@ import static apgas.Constructs.places;
 
 import apgas.Configuration;
 import apgas.Place;
+import apgas.util.GlobalRef;
 
 import java.util.ArrayList;
 import java.util.Locale;
@@ -34,7 +35,14 @@ public class Squares {
 
         //primes = new long[m + 1];
         primes = new ArrayList<>();
+        //final GlobalRef<ArrayList<Long>> primeRef = new GlobalRef<>(new ArrayList<>());
         maxPrimePos = 0;
+
+        Configuration.APGAS_PLACES.setDefaultValue(4);
+        Configuration.APGAS_THREADS.setDefaultValue(4);
+        int t = Configuration.APGAS_THREADS.get();
+        int p = Configuration.APGAS_PLACES.get();
+        //final long nPerPlace = n / p;
 
         int min;
         int max;
@@ -71,8 +79,21 @@ public class Squares {
                 }
             }
 
+            /*finish(() -> {
+                for (final Place place : places()) {
+                    asyncAt(place, () -> {
+                        for (int x = 0; x < nPerPlace; x++) {
+                            long zVal = 0;
+                            for (int j = 0; j < n; j++) {
+                                //zVal += findPrimeNumber(a[x][y][j]);
+                            }
+                        }
+                    });
+                }
+            });*/
+
             // compute meanValue
-            for (int x = 0; x < n; x++) {
+            /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     int counter = 0;
                     meanValue[x][y] = 0;
@@ -88,7 +109,46 @@ public class Squares {
                     }
                     meanValue[x][y] /= counter;
                 }
+            }*/
+
+            final GlobalRef<double[][]> meanVal = new GlobalRef<>(new double[n][n]);
+            final int nPerPlace = n * n / p;
+
+            finish(() -> {
+                for (final Place place : places()) {
+                    asyncAt(place, () -> {
+                        for (int pos = (place.id * nPerPlace); pos < (place.id + 1) * nPerPlace; pos++) {
+                            double myMeanVal = 0;
+                            int counter = 0;
+                            int y = pos % n;
+                            int x = (int) (pos / n);
+                            for (int j = x - d; j <= x + d; j++) {
+                                if (j >= 0 && j < n) {
+                                    for (int k = y - d; k <= y + d; k++) {
+                                        if (k >= 0 && k < n) {
+                                            counter++;
+                                            myMeanVal += zValue[j][k];
+                                        }
+                                    }
+                                }
+                            }
+                            myMeanVal /= counter;
+                            final double remoteResult = myMeanVal;
+                            //System.out.println(place.id + ": "+ pos + " -> [" + x + ", " + y + "] = " + remoteResult);
+                            asyncAt((meanVal.home()), () -> {
+                                meanVal.get()[x][y] = remoteResult;
+                            });
+                        }
+                    });
+                }
+            });
+
+            for (int x = 0; x < n; x++) {
+                for (int y = 0; y < n; y++) {
+                    meanValue[x][y] = meanVal.get()[x][y];
+                }
             }
+
 
             // compute new a array
             for (int x = 0; x < n; x++) {
@@ -211,7 +271,7 @@ public class Squares {
         long a;
         if (maxPrimePos == 0) {
             a = 2;
-            primes.add(0,0l);
+            primes.add(0, 0l);
         } else {
             a = primes.get(maxPrimePos) + 1;
         }
@@ -227,7 +287,7 @@ public class Squares {
             }
             if (prime > 0) {
                 count++;
-                primes.add(count,a);//set(count,a);
+                primes.add(count, a);//set(count,a);
                 maxPrimePos++;
             }
             a++;
