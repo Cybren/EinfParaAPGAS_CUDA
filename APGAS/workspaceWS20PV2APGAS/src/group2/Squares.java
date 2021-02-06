@@ -1,10 +1,5 @@
 package group2;
 
-import static apgas.Constructs.asyncAt;
-import static apgas.Constructs.finish;
-import static apgas.Constructs.here;
-import static apgas.Constructs.places;
-
 import apgas.Configuration;
 import apgas.Place;
 import apgas.util.GlobalRef;
@@ -13,11 +8,15 @@ import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Random;
 
+import static apgas.Constructs.*;
+
 public class Squares {
 
     //private static long[] primes;
     private static int maxPrimePos;
     private static ArrayList<Long> primes;
+    private static GlobalRef<ArrayList<Long>> primeRef;
+    private static GlobalRef<Integer> maxPrimePosRef;
 
     public static void main(String[] args) {
         Locale.setDefault(Locale.ENGLISH);
@@ -34,9 +33,10 @@ public class Squares {
         double[][] meanValue = new double[n][n];
 
         //primes = new long[m + 1];
-        primes = new ArrayList<>();
-        //final GlobalRef<ArrayList<Long>> primeRef = new GlobalRef<>(new ArrayList<>());
+        primes = new ArrayList<Long>();
+        primeRef = new GlobalRef<>(primes);
         maxPrimePos = 0;
+        maxPrimePosRef = new GlobalRef<Integer>(0);
 
         Configuration.APGAS_PLACES.setDefaultValue(4);
         Configuration.APGAS_THREADS.setDefaultValue(4);
@@ -70,27 +70,36 @@ public class Squares {
             long iterationStart = System.nanoTime();
 
             // compute zValue
-            for (int x = 0; x < n; x++) {
+            /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     //zValue[x][y] = 0;
                     for (int j = 0; j < n; j++) {
                         zValue[x][y] += findPrimeNumber(a[x][y][j]);
                     }
                 }
-            }
+            }*/
 
-            /*finish(() -> {
+            final GlobalRef<long[][]> zVal = new GlobalRef<>(zValue);
+            final int nPerPlace = n * n / p;
+
+            finish(() -> {
                 for (final Place place : places()) {
                     asyncAt(place, () -> {
-                        for (int x = 0; x < nPerPlace; x++) {
-                            long zVal = 0;
+                        for(int pos = place.id * nPerPlace; pos < (place.id + 1) * nPerPlace; pos++) {
+                            long myZVal = 0;
+                            int x = (int) (pos / n);
+                            int y = pos % n;
                             for (int j = 0; j < n; j++) {
-                                //zVal += findPrimeNumber(a[x][y][j]);
+                                myZVal += findPrimeNumber(a[x][y][j]);
                             }
+                            final long remoteResult = myZVal;
+                            asyncAt(zVal.home(), () -> {
+                                zVal.get()[x][y] = zVal.get()[x][y] + remoteResult;
+                            });
                         }
                     });
                 }
-            });*/
+            });
 
             // compute meanValue
             /*for (int x = 0; x < n; x++) {
@@ -111,13 +120,12 @@ public class Squares {
                 }
             }*/
 
-            final GlobalRef<double[][]> meanVal = new GlobalRef<>(new double[n][n]);
-            final int nPerPlace = n * n / p;
+            final GlobalRef<double[][]> meanVal = new GlobalRef<>(meanValue);
 
             finish(() -> {
                 for (final Place place : places()) {
                     asyncAt(place, () -> {
-                        for (int pos = (place.id * nPerPlace); pos < (place.id + 1) * nPerPlace; pos++) {
+                        for (int pos = place.id * nPerPlace; pos < (place.id + 1) * nPerPlace; pos++) {
                             double myMeanVal = 0;
                             int counter = 0;
                             int y = pos % n;
@@ -143,15 +151,15 @@ public class Squares {
                 }
             });
 
-            for (int x = 0; x < n; x++) {
+            /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     meanValue[x][y] = meanVal.get()[x][y];
                 }
-            }
+            }*/
 
 
             // compute new a array
-            for (int x = 0; x < n; x++) {
+            /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     for (int z = 0; z < n; z++) {
                         random.setSeed((long) meanValue[x][y] + z);
@@ -160,7 +168,49 @@ public class Squares {
                         a[x][y][z] = random.nextInt(bound) + 1;
                     }
                 }
-            }
+            }*/
+
+            final GlobalRef<int[][][]> ga = new GlobalRef<>(a);
+            final int nnnPerPlace = n * n * n / p;
+
+            final int iteration = currentIteration;
+
+            finish(() -> {
+                for (final Place place : places()) {
+                    asyncAt(place, () -> {
+                        for (int pos = place.id * nnnPerPlace; pos < (place.id + 1) * nnnPerPlace; pos++) {
+                            //int z = pos % n;
+                            //int y = ((pos-z) / n) % n;
+                            //int x = (int) pos / (n*n);
+                            for (int x = (int) (pos / (n * n)); x < n; x++) {
+                                for (int y = (int) ((pos / n) % n); y < n; y++) {
+                                    for (int z = pos % n; z < n; z++) {
+                                        random.setSeed((long) meanValue[x][y] + z);
+                                        // currentIteration is in range of 0..(i-1)
+                                        int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
+                                        final int fx = x;
+                                        final int fy = y;
+                                        final int fz = z;
+                                        final int result = random.nextInt(bound) + 1;
+                                        asyncAt(ga.home(), () -> {
+                                            ga.get()[fx][fy][fz] = result;
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+
+            /*for (int x = 0; x < n; x++) {
+                for (int y = 0; y < n; y++) {
+                    for (int z = 0; z < n; z++) {
+                        a[x][y][z] = ga.get()[x][y][z];
+                    }
+                }
+            }*/
+
 
             // resize primes-Array for next iteration
             /*int len = m + 1 + (int) ((n * primes[maxPrimePos]) / 50);
@@ -187,7 +237,7 @@ public class Squares {
         // To Do: compute min- and max-value and positions in a and output them
 
         //min = (int) primes[maxPrimePos] + 1;
-        min = (int) (primes.get(maxPrimePos) + 1);
+        min = (int) (primeRef.get().get(maxPrimePosRef.get()) + 1);
         max = 0;
         for (int x = 0; x < n; x++) {
             for (int y = 0; y < n; y++) {
@@ -263,7 +313,7 @@ public class Squares {
     }*/
 
     // with ArrayList
-    public static long findPrimeNumber(int x) {
+    /*public static long findPrimeNumber(int x) {
         if (x <= maxPrimePos) {
             return primes.get(x);
         }
@@ -287,8 +337,41 @@ public class Squares {
             }
             if (prime > 0) {
                 count++;
-                primes.add(count, a);//set(count,a);
+                primes.add(count, a);
                 maxPrimePos++;
+            }
+            a++;
+        }
+        return (--a);
+    }*/
+
+    // with ArrayList and GlobalRef
+    public static long findPrimeNumber(int x) {
+        if (x <= maxPrimePosRef.get()) {
+            return primeRef.get().get(x);
+        }
+        int count = maxPrimePosRef.get();
+        long a;
+        if (maxPrimePosRef.get() == 0) {
+            a = 2;
+            primeRef.get().add(0, 0l);
+        } else {
+            a = primeRef.get().get(maxPrimePosRef.get()) + 1;
+        }
+        while (count < x) {
+            long b = 2;
+            int prime = 1;  // to check if found a prime
+            while (b * b <= a) {
+                if (a % b == 0) {
+                    prime = 0;
+                    break;
+                }
+                b++;
+            }
+            if (prime > 0) {
+                count++;
+                primeRef.get().add(count, a);
+                maxPrimePosRef.set(maxPrimePosRef.get() + 1);
             }
             a++;
         }
