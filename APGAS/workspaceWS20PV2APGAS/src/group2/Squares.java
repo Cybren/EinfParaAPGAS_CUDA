@@ -7,6 +7,7 @@ import apgas.util.GlobalRef;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static apgas.Constructs.*;
 
@@ -16,7 +17,7 @@ public class Squares {
     private static int maxPrimePos;
     private static ArrayList<Long> primes;
     private static GlobalRef<ArrayList<Long>> primeRef;
-    private static GlobalRef<Integer> maxPrimePosRef;
+    private static GlobalRef<AtomicInteger> maxPrimePosRef;
 
     public static void main(String[] args) {
         Locale.setDefault(Locale.ENGLISH);
@@ -36,16 +37,16 @@ public class Squares {
         primes = new ArrayList<Long>();
         primeRef = new GlobalRef<>(primes);
         maxPrimePos = 0;
-        maxPrimePosRef = new GlobalRef<Integer>(0);
+        maxPrimePosRef = new GlobalRef<>(new AtomicInteger(maxPrimePos));
 
         Configuration.APGAS_PLACES.setDefaultValue(4);
-        Configuration.APGAS_THREADS.setDefaultValue(4);
+        Configuration.APGAS_THREADS.setDefaultValue(32);
         int t = Configuration.APGAS_THREADS.get();
         int p = Configuration.APGAS_PLACES.get();
         //final long nPerPlace = n / p;
 
-        int min;
-        int max;
+        AtomicInteger min;
+        AtomicInteger max;
         ArrayList<ArrayList<Integer>> minPos = new ArrayList<>();
         ArrayList<ArrayList<Integer>> maxPos = new ArrayList<>();
         //int[] maxPos = new int[3];
@@ -81,23 +82,27 @@ public class Squares {
 
             final GlobalRef<long[][]> zVal = new GlobalRef<>(zValue);
             final int nPerPlace = n * n / p;
+            final int nPerWorker = (int) (n*n)/(p*t)+1;
 
             finish(() -> {
                 for (final Place place : places()) {
-                    asyncAt(place, () -> {
-                        for(int pos = place.id * nPerPlace; pos < (place.id + 1) * nPerPlace; pos++) {
+                    for (int worker = 0; worker < t; worker++) {
+                        asyncAt(place, () -> {
+                        for (int pos = place.id * nPerPlace; pos < (place.id + 1) * nPerPlace; pos++) {
                             long myZVal = 0;
                             int x = (int) (pos / n);
                             int y = pos % n;
                             for (int j = 0; j < n; j++) {
                                 myZVal += findPrimeNumber(a[x][y][j]);
                             }
+                            System.out.println("Hi from place " + place.id + ", thread " + getCurrentWorker().getId());
                             final long remoteResult = myZVal;
                             asyncAt(zVal.home(), () -> {
-                                zVal.get()[x][y] = zVal.get()[x][y] + remoteResult;
-                            });
+                                    zVal.get()[x][y] = zVal.get()[x][y] + remoteResult;
+                        });
                         }
-                    });
+                        });
+                    }
                 }
             });
 
@@ -237,9 +242,54 @@ public class Squares {
         // To Do: compute min- and max-value and positions in a and output them
 
         //min = (int) primes[maxPrimePos] + 1;
-        min = (int) (primeRef.get().get(maxPrimePosRef.get()) + 1);
-        max = 0;
-        for (int x = 0; x < n; x++) {
+        //min = (int) (primeRef.get().get(maxPrimePosRef.get()) + 1);
+        //max = 0;
+
+        final GlobalRef<AtomicInteger> minRef = new GlobalRef<>(new AtomicInteger((int) (primeRef.get().get(maxPrimePosRef.get().get()) + 1)));
+        final GlobalRef<AtomicInteger> maxRef = new GlobalRef<>(new AtomicInteger(0));
+        final int nnnPerPlace = n * n * n / p;
+
+        finish(() -> {
+            for (final Place place : places()) {
+                asyncAt(place, () -> {
+                    for (int pos = place.id * nnnPerPlace; pos < (place.id + 1) * nnnPerPlace; pos++) {
+                        //int z = pos % n;
+                        //int y = ((pos-z) / n) % n;
+                        //int x = (int) pos / (n*n);
+                        for (int x = (int) (pos / (n * n)); x < n; x++) {
+                            for (int y = (int) ((pos / n) % n); y < n; y++) {
+                                for (int z = pos % n; z < n; z++) {
+                                    if (a[x][y][z] <= minRef.get().get()) {
+                                        if (a[x][y][z] < minRef.get().get()) {
+                                            minPos.clear();
+                                        }
+                                        minRef.get().set(a[x][y][z]);
+                                        ArrayList<Integer> newMinPos = new ArrayList<>();
+                                        newMinPos.add(x);
+                                        newMinPos.add(y);
+                                        newMinPos.add(z);
+                                        minPos.add(newMinPos);
+                                    }
+                                    if (a[x][y][z] >= maxRef.get().get()) {
+                                        if (a[x][y][z] > maxRef.get().get()) {
+                                            maxPos.clear();
+                                        }
+                                        maxRef.get().set(a[x][y][z]);
+                                        ArrayList<Integer> newMaxPos = new ArrayList<>();
+                                        newMaxPos.add(x);
+                                        newMaxPos.add(y);
+                                        newMaxPos.add(z);
+                                        maxPos.add(newMaxPos);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        /*for (int x = 0; x < n; x++) {
             for (int y = 0; y < n; y++) {
                 for (int z = 0; z < n; z++) {
                     if (a[x][y][z] <= min) {
@@ -266,10 +316,10 @@ public class Squares {
                     }
                 }
             }
-        }
+        }*/
 
-        System.out.println("Min=" + min + " " + minPos);
-        System.out.println("Max=" + max + " " + maxPos);
+        System.out.println("Min=" + minRef.get().get() + " " + minPos);
+        System.out.println("Max=" + maxRef.get().get() + " " + maxPos);
 
         /*System.out.println(String.format("Min=%d (%d,%d,%d)", min, minPos[0], minPos[1], minPos[2]));
         System.out.println(String.format("Max=%d (%d,%d,%d)", max, maxPos[0], maxPos[1], maxPos[2]));*/
@@ -347,16 +397,16 @@ public class Squares {
 
     // with ArrayList and GlobalRef
     public static long findPrimeNumber(int x) {
-        if (x <= maxPrimePosRef.get()) {
+        if (x <= maxPrimePosRef.get().get()) {
             return primeRef.get().get(x);
         }
-        int count = maxPrimePosRef.get();
+        int count = maxPrimePosRef.get().get();
         long a;
-        if (maxPrimePosRef.get() == 0) {
+        if (maxPrimePosRef.get().get() == 0) {
             a = 2;
             primeRef.get().add(0, 0l);
         } else {
-            a = primeRef.get().get(maxPrimePosRef.get()) + 1;
+            a = primeRef.get().get(maxPrimePosRef.get().get()) + 1;
         }
         while (count < x) {
             long b = 2;
@@ -371,7 +421,7 @@ public class Squares {
             if (prime > 0) {
                 count++;
                 primeRef.get().add(count, a);
-                maxPrimePosRef.set(maxPrimePosRef.get() + 1);
+                maxPrimePosRef.get().addAndGet(1);//set(maxPrimePosRef.get().get() + 1);
             }
             a++;
         }
