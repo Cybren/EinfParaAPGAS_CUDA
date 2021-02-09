@@ -118,11 +118,11 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
     int threadNum = bx * blocksize3 + tx;
     int outputWidth = inputWidth + numSeams;
     if (threadNum == 0) {
-        printf("increaseWidth numSeams: %d width: %d height: %d\n", numSeams, inputWidth, height);
+        printf("increaseWidth numSeams: %d inwidth: %d outwidth: %d height: %d\n", numSeams, inputWidth, outputWidth, height);
     }
     //find seams
     if (threadNum < numSeams) {//sumBuffer sizeof(container) * input->width * input->height; seams sizeof(unsigned short) * input->height * numSeams
-        seams[(height - 1) * numSeams + threadNum] = sumBuffer[inputWidth* (height-1) + threadNum].xPos;
+        seams[(height - 1) * numSeams + threadNum] = sumBuffer[inputWidth * (height-1) + threadNum].xPos;
         for (int y = height-2; y > -1; y--){
             int prevX = seams[threadNum * height + y + 1];
             if (prevX == inputWidth - 1) { // rightmost pixel of a row
@@ -143,27 +143,32 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
         int oldX = 0;
         int seamIndex = 0;
         int row = threadNum * outputWidth * 3;
-        for (int x = 0; x < outputWidth; x++) {// illegal Memory Access
-            /*if (oldX == seams[threadNum * width + seamIndex] && x > 0) {
-                outputImageData[(threadNum * width) + x * 3]     = outputImageData[(threadNum * width) + (x - 1) * 3];
-                outputImageData[(threadNum * width) + x * 3 + 1] = outputImageData[(threadNum * width) + (x - 1) * 3 + 1];
-                outputImageData[(threadNum * width) + x * 3 + 2] = outputImageData[(threadNum * width) + (x - 1) * 3 + 2];
+        for (int x = 0; x < outputWidth; x++) {
+            if (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) {
+                //printf("thread %d at %d (%d) copy seam %d at %d\n", threadNum, x, oldX, threadNum * numSeams + seamIndex, seams[threadNum * numSeams + seamIndex]);
+                outputImageData[row + x * 3]     = outputImageData[row + (x - 1) * 3];
+                outputImageData[row + x * 3 + 1] = outputImageData[row + (x - 1) * 3 + 1];
+                outputImageData[row + x * 3 + 2] = outputImageData[row + (x - 1) * 3 + 2];
                 seamIndex++;
-            }else{*/
-                outputImageData[row + x * 3]     = imageData[row + oldX * 3];
-                outputImageData[row + x * 3 + 1] = imageData[row + oldX * 3 + 1];
-                outputImageData[row + x * 3 + 2] = imageData[row + oldX * 3 + 2];
+            }else{
+                outputImageData[row + x * 3] = 0;// imageData[row + oldX * 3];
+                outputImageData[row + x * 3 + 1] = 0;// imageData[row + oldX * 3 + 1];
+                outputImageData[row + x * 3 + 2] = 0; // imageData[row + oldX * 3 + 2];
                 oldX++;
-            //}
+            }
         }
     }
     if (threadNum == 0) {
         printf("increaseWidth at end\n");
+        printf("%d\n", outputImageData[0]);
+        printf("%d\n", outputImageData[200]);
+        printf("%d\n", outputImageData[444]);
+        printf("%d\n", outputImageData[1337]);
     }
 }
 
 int main(int argc, char* argv[]) {
-    printf("start");
+    printf("start\n");
     if (argc != 4) {
         printf("Usage: %s inputJPEG outputJPEG numSeams\n", argv[0]);
         return 0;
@@ -180,30 +185,33 @@ int main(int argc, char* argv[]) {
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaSetDevice failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
     int outputPixelBufferSize = (input->width + numSeams) * input->height;
+    int width = input->width;
+    int height = input->height;
     int inputPixelBufferSize = input->width * input->height;
     int sumBufferSize = sizeof(container) * input->width * input->height;
     unsigned char* d_inputImageData;
     unsigned char* d_outputImageData;
     unsigned short* d_energyBuffer;
     struct container* d_sumBuffer;
-    struct container* sumBuffer;
+    struct container* startBuffer;
     unsigned short* d_seams;
+    startBuffer = (struct container*)malloc(sizeof(container)*input->width);
 
     //create outputimage struct
-    struct imgRawImage* output;
+    struct imgRawImage outputObject;
+    struct imgRawImage* output = &outputObject;
     unsigned char* outputImageData = (unsigned char*)malloc(sizeof(unsigned char) * outputPixelBufferSize * 3);
-    sumBuffer = (struct container*)malloc(sumBufferSize);
-    output = (struct imgRawImage*)malloc(sizeof(struct imgRawImage));
     output->numComponents = input->numComponents;
     output->width = input->width + numSeams;
     output->height = input->height;
+    output->lpData = (unsigned char*)malloc(sizeof(unsigned char) * outputPixelBufferSize * 3);
 
     //allocate nessessary memory on GPU
     cudaStatus = cudaMalloc(&d_inputImageData, sizeof(unsigned char) * inputPixelBufferSize * 3);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_inputImage failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaMalloc(&d_outputImageData, sizeof(unsigned char) * outputPixelBufferSize * 3);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_imageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaMalloc(&d_energyBuffer, sizeof(unsigned short) * outputPixelBufferSize);
+    cudaStatus = cudaMalloc(&d_energyBuffer, sizeof(unsigned short) * inputPixelBufferSize);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_energyBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaMalloc(&d_sumBuffer, sumBufferSize);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
@@ -211,7 +219,7 @@ int main(int argc, char* argv[]) {
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_seams failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
     
     //start Kernel 1 to calculate all Energies
-    cudaStatus = cudaMemcpy(d_inputImageData, input->lpData, sizeof(unsigned char) * inputPixelBufferSize, cudaMemcpyHostToDevice);
+    cudaStatus = cudaMemcpy(d_inputImageData, input->lpData, sizeof(unsigned char) * inputPixelBufferSize * 3, cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy input->lpData -> d_inputImageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
     dim3 threadsPerBlock1(blockWidth1, blockHeight1);
     dim3 numBlocks1(ceil(input->width / threadsPerBlock1.x), ceil(input->height / threadsPerBlock1.y));
@@ -231,19 +239,21 @@ int main(int argc, char* argv[]) {
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculateMinEnergySums failed: %s\n", cudaGetErrorString(cudaStatus)); }
 
-    //copy geht sehr viel kleiner, nur zu faul
     //calculate lowest energy-sums in last row on cpu
     printf("wanna calculate seams\n");
-    /*cudaStatus = cudaMemcpy(sumBuffer, d_sumBuffer, sumBufferSize, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(startBuffer, (d_sumBuffer + width * (height - 1)), width, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_sumBuffer -> sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    quicksort(sumBuffer + (input->height - 1) * input->width * sizeof(container), 0, input->width);
-    cudaStatus = cudaMemcpy(d_sumBuffer, sumBuffer, sumBufferSize, cudaMemcpyHostToDevice);
+    quicksort(startBuffer, 0, width);
+    cudaStatus = cudaMemcpy((d_sumBuffer + width * (height - 1)), startBuffer, width, cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy sumBuffer -> d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    */
+    
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch quicksort failed: %s\n", cudaGetErrorString(cudaStatus)); }
+
     //start final kernel to create outputImage
     dim3 threadsPerBlock3(blocksize3);
     dim3 numBlocks3(ceil(output->height / blocksize3));
-    increaseWidth <<<numBlocks3, threadsPerBlock3 >>>(d_inputImageData, d_outputImageData, d_sumBuffer, d_seams, numSeams, input->width, input->height);
+    increaseWidth <<<numBlocks3, threadsPerBlock3>>>(d_inputImageData, d_outputImageData, d_sumBuffer, d_seams, numSeams, input->width, input->height);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "increaseWidth launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaDeviceSynchronize();

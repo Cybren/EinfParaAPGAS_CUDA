@@ -81,9 +81,7 @@ int storeJpegImageFile(struct imgRawImage* lpImage, char* lpFilename) {
 
 	fHandle = fopen(lpFilename, "wb");
 	if(fHandle == NULL) {
-		#ifdef DEBUG
 			fprintf(stderr, "%s:%u Failed to open output file %s\n", __FILE__, __LINE__, lpFilename);
-		#endif
 		return 1;
 	}
 
