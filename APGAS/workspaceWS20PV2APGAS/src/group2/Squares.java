@@ -14,10 +14,10 @@ import static apgas.Constructs.*;
 public class Squares {
 
     //private static long[] primes;
-    private static int maxPrimePos;
-    private static ArrayList<Long> primes;
-    private static GlobalRef<ArrayList<Long>> primeRef;
-    private static GlobalRef<AtomicInteger> maxPrimePosRef;
+    private static int maxPrimePos = 0;
+    private static ArrayList<Long> primes = new ArrayList<Long>();
+    final static GlobalRef<ArrayList<Long>> primeRef = new GlobalRef<>(primes);
+    final static GlobalRef<AtomicInteger> maxPrimePosRef = new GlobalRef<>(new AtomicInteger(0));
 
     public static void main(String[] args) {
         Locale.setDefault(Locale.ENGLISH);
@@ -29,20 +29,23 @@ public class Squares {
         int i = Integer.parseInt(args[4]);
         int verbose = Integer.parseInt(args[5]);
 
+        System.out.println("java group2.Squares " + n + " " + m + " " + seedA + " " + d + " " + i + " " + verbose + "\n");
+
         int[][][] a = new int[n][n][n];
         long[][] zValue = new long[n][n];
         double[][] meanValue = new double[n][n];
 
         //primes = new long[m + 1];
-        primes = new ArrayList<Long>();
-        primeRef = new GlobalRef<>(primes);
-        maxPrimePos = 0;
-        maxPrimePosRef = new GlobalRef<>(new AtomicInteger(maxPrimePos));
+        //primes = new ArrayList<Long>();
+        //primeRef = new GlobalRef<>(primes);
+        //maxPrimePos = 0;
+        //maxPrimePosRef = new GlobalRef<>(new AtomicInteger(0));
 
         Configuration.APGAS_PLACES.setDefaultValue(4);
         Configuration.APGAS_THREADS.setDefaultValue(32);
         int t = Configuration.APGAS_THREADS.get();
         int p = Configuration.APGAS_PLACES.get();
+
         //final long nPerPlace = n / p;
 
         AtomicInteger min;
@@ -82,12 +85,14 @@ public class Squares {
 
             final GlobalRef<long[][]> zVal = new GlobalRef<>(zValue);
             final int nPerPlace = n * n / p;
-            final int nPerWorker = (int) (n*n)/(p*t)+1;
+            final int nPerWorker = (int) (n * n) / (p * t) + 1;
 
-            finish(() -> {
+            long zValStart = System.nanoTime();
+
+            /*finish(() -> {
                 for (final Place place : places()) {
-                    for (int worker = 0; worker < t; worker++) {
-                        asyncAt(place, () -> {
+                    //for (int worker = 0; worker < t; worker++) {
+                    asyncAt(place, () -> {
                         for (int pos = place.id * nPerPlace; pos < (place.id + 1) * nPerPlace; pos++) {
                             long myZVal = 0;
                             int x = (int) (pos / n);
@@ -95,16 +100,49 @@ public class Squares {
                             for (int j = 0; j < n; j++) {
                                 myZVal += findPrimeNumber(a[x][y][j]);
                             }
-                            System.out.println("Hi from place " + place.id + ", thread " + getCurrentWorker().getId());
                             final long remoteResult = myZVal;
                             asyncAt(zVal.home(), () -> {
-                                    zVal.get()[x][y] = zVal.get()[x][y] + remoteResult;
-                        });
+                                zVal.get()[x][y] = zVal.get()[x][y] + remoteResult;
+                            });
                         }
+                    });
+                }
+            });*/
+
+            finish(() -> {
+                int startVal = 0;
+                int blockSize = n*(n/2)/p;
+                int placeNum = (places().size() > 1 ? 1 : 0);
+                while (startVal < n*n) {
+                    final int thisStartVal = startVal;
+                    final int thisBlockSize = blockSize;
+                    asyncAt(place(placeNum), () -> {
+                        int x, y, z;
+                        long[] myZVal = new long[thisBlockSize];
+                        for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < n * n; pos++) {
+                            x = (int) (pos / n);
+                            y = pos % n;
+                            for (int j = 0; j < n; j++) {
+                                myZVal[pos-thisStartVal] += findPrimeNumber(a[x][y][j]);
+                            }
+                        }
+                        final long[] remoteZVal = myZVal;
+                        asyncAt(zVal.home(), () -> {
+                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < n * n; pos++) {
+                                zVal.get()[(int) (pos/n)][pos%n] = zVal.get()[(int) (pos/n)][pos%n] + remoteZVal[pos-thisStartVal];
+                            }
                         });
+                    });
+                    startVal += blockSize;
+                    placeNum = (placeNum + 1) % p;
+                    if (placeNum == 0) {
+                        blockSize *= 1;
                     }
                 }
             });
+
+            long zValEnd = System.nanoTime();
+            System.out.println("zValue : time=" + ((zValEnd - zValStart) / 1E9D) + " sec");
 
             // compute meanValue
             /*for (int x = 0; x < n; x++) {
@@ -126,6 +164,8 @@ public class Squares {
             }*/
 
             final GlobalRef<double[][]> meanVal = new GlobalRef<>(meanValue);
+
+            long meanValStart = System.nanoTime();
 
             finish(() -> {
                 for (final Place place : places()) {
@@ -156,6 +196,9 @@ public class Squares {
                 }
             });
 
+            long meanValEnd = System.nanoTime();
+            System.out.println("meanValue : time=" + ((meanValEnd - meanValStart) / 1E9D) + " sec");
+
             /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     meanValue[x][y] = meanVal.get()[x][y];
@@ -180,33 +223,34 @@ public class Squares {
 
             final int iteration = currentIteration;
 
+            long aStart = System.nanoTime();
+
             finish(() -> {
                 for (final Place place : places()) {
                     asyncAt(place, () -> {
+                        int[][][] myA = new int[n / p][n][n];
+                        final int xStart = (int) ((place.id * nnnPerPlace) / (n * n));
                         for (int pos = place.id * nnnPerPlace; pos < (place.id + 1) * nnnPerPlace; pos++) {
-                            //int z = pos % n;
-                            //int y = ((pos-z) / n) % n;
-                            //int x = (int) pos / (n*n);
-                            for (int x = (int) (pos / (n * n)); x < n; x++) {
-                                for (int y = (int) ((pos / n) % n); y < n; y++) {
-                                    for (int z = pos % n; z < n; z++) {
-                                        random.setSeed((long) meanValue[x][y] + z);
-                                        // currentIteration is in range of 0..(i-1)
-                                        int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
-                                        final int fx = x;
-                                        final int fy = y;
-                                        final int fz = z;
-                                        final int result = random.nextInt(bound) + 1;
-                                        asyncAt(ga.home(), () -> {
-                                            ga.get()[fx][fy][fz] = result;
-                                        });
-                                    }
-                                }
-                            }
+                            int x = (int) (pos / (n * n));
+                            int y = (int) ((pos / n) % n);
+                            int z = pos % n;
+
+                            random.setSeed((long) meanValue[x][y] + z);
+                            // currentIteration is in range of 0..(i-1)
+                            int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
+                            myA[x - xStart][y][z] = random.nextInt(bound) + 1;
                         }
+                        asyncAt(ga.home(), () -> {
+                            for (int x = 0; x < (int) (n / p); x++) {
+                                ga.get()[x + xStart] = myA[x];
+                            }
+                        });
                     });
                 }
             });
+
+            long aEnd = System.nanoTime();
+            System.out.println("new a : time=" + ((aEnd - aStart) / 1E9D) + " sec");
 
             /*for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
@@ -232,11 +276,11 @@ public class Squares {
                     System.out.println();
                 }
 
-                long iterationEnd = System.nanoTime();
-
-                System.out.println("Iteration " + currentIteration + " time=" + ((iterationEnd - iterationStart) / 1E9D) + " sec");
-                System.out.println();
             }
+            long iterationEnd = System.nanoTime();
+
+            System.out.println("Iteration " + currentIteration + " time=" + ((iterationEnd - iterationStart) / 1E9D) + " sec");
+            System.out.println();
         }
 
         // To Do: compute min- and max-value and positions in a and output them
@@ -245,49 +289,117 @@ public class Squares {
         //min = (int) (primeRef.get().get(maxPrimePosRef.get()) + 1);
         //max = 0;
 
-        final GlobalRef<AtomicInteger> minRef = new GlobalRef<>(new AtomicInteger((int) (primeRef.get().get(maxPrimePosRef.get().get()) + 1)));
-        final GlobalRef<AtomicInteger> maxRef = new GlobalRef<>(new AtomicInteger(0));
+        GlobalRef<AtomicInteger> minRef = new GlobalRef<>(new AtomicInteger((int) (primeRef.get().get(maxPrimePosRef.get().get()) + 1)));
+        GlobalRef<AtomicInteger> maxRef = new GlobalRef<>(new AtomicInteger(0));
+        GlobalRef<ArrayList> minPosRef = new GlobalRef<>(minPos);
+        GlobalRef<ArrayList> maxPosRef = new GlobalRef<>(maxPos);
         final int nnnPerPlace = n * n * n / p;
 
-        finish(() -> {
+        long minMaxStart = System.nanoTime();
+
+        /*finish(() -> {
             for (final Place place : places()) {
                 asyncAt(place, () -> {
                     for (int pos = place.id * nnnPerPlace; pos < (place.id + 1) * nnnPerPlace; pos++) {
-                        //int z = pos % n;
-                        //int y = ((pos-z) / n) % n;
-                        //int x = (int) pos / (n*n);
-                        for (int x = (int) (pos / (n * n)); x < n; x++) {
-                            for (int y = (int) ((pos / n) % n); y < n; y++) {
-                                for (int z = pos % n; z < n; z++) {
-                                    if (a[x][y][z] <= minRef.get().get()) {
-                                        if (a[x][y][z] < minRef.get().get()) {
-                                            minPos.clear();
-                                        }
-                                        minRef.get().set(a[x][y][z]);
-                                        ArrayList<Integer> newMinPos = new ArrayList<>();
-                                        newMinPos.add(x);
-                                        newMinPos.add(y);
-                                        newMinPos.add(z);
-                                        minPos.add(newMinPos);
-                                    }
-                                    if (a[x][y][z] >= maxRef.get().get()) {
-                                        if (a[x][y][z] > maxRef.get().get()) {
-                                            maxPos.clear();
-                                        }
-                                        maxRef.get().set(a[x][y][z]);
-                                        ArrayList<Integer> newMaxPos = new ArrayList<>();
-                                        newMaxPos.add(x);
-                                        newMaxPos.add(y);
-                                        newMaxPos.add(z);
-                                        maxPos.add(newMaxPos);
-                                    }
-                                }
+                        int x = (int) (pos / (n * n));
+                        int y = (int) ((pos / n) % n);
+                        int z = pos % n;
+                        int minVal = at(minRef.home(), () -> minRef.get().get());
+                        int maxVal = at(maxRef.home(), () -> maxRef.get().get());
+                        if (a[x][y][z] <= minVal) {
+                            if (a[x][y][z] < minVal) {
+                                at(minPosRef.home(), () -> {
+                                    minPosRef.get().clear();
+                                });
                             }
+                            final int xVal = x;
+                            final int yVal = y;
+                            final int zVal = z;
+                            at(minRef.home(), () -> {
+                                minRef.get().set(a[xVal][yVal][zVal]);
+                            });
+                            ArrayList<Integer> newMinPos = new ArrayList<>();
+                            newMinPos.add(x);
+                            newMinPos.add(y);
+                            newMinPos.add(z);
+                            at(minPosRef.home(), () -> {
+                                //System.out.println(minPosRef.get());
+                                minPosRef.get().add(newMinPos);
+                                //System.out.println(minPosRef.get());
+                            });
+                        }
+                        if (a[x][y][z] >= maxVal) {
+                            if (a[x][y][z] > maxVal) {
+                                at(maxPosRef.home(), () -> maxPosRef.get().clear());
+                            }
+                            final int xVal = x;
+                            final int yVal = y;
+                            final int zVal = z;
+                            at(maxRef.home(), () -> maxRef.get().set(a[xVal][yVal][zVal]));
+                            ArrayList<Integer> newMaxPos = new ArrayList<>();
+                            newMaxPos.add(x);
+                            newMaxPos.add(y);
+                            newMaxPos.add(z);
+                            at(maxPosRef.home(), () -> maxPosRef.get().add(newMaxPos));
                         }
                     }
                 });
             }
+        });*/
+
+        finish(() -> {
+            int startVal = 0;
+            int placeNum = (places().size() > 1 ? 1 : 0);
+            int blockSize = (int) (n / 2) * n;
+            while (startVal < n * n * n) {
+                final int thisStartVal = startVal;
+                final int thisBlockSize = blockSize;
+                asyncAt(place(placeNum), () -> {
+                    int minVal = at(minRef.home(), () -> minRef.get().get());
+                    int maxVal = at(maxRef.home(), () -> maxRef.get().get());
+                    int x, y, z;
+                    ArrayList<int[]> myMinPos = new ArrayList<>();
+                    ArrayList<int[]> myMaxPos = new ArrayList<>();
+                    boolean newMin = false;
+                    boolean newMax = false;
+                    for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < n * n * n; pos++) {
+                        x = (int) (pos / (n * n));
+                        y = (int) ((pos / n) % n);
+                        z = pos % n;
+                        if (a[x][y][z] <= minVal) {
+                            if (a[x][y][z] < minVal) {
+                                minVal = a[x][y][z];
+                                myMinPos.clear();
+                            }
+                            int[] newPos = {x, y, z};
+                            myMinPos.add(newPos);
+                            newMin = true;
+                        }
+                        if (a[x][y][z] >= maxVal) {
+                            if (a[x][y][z] > maxVal) {
+                                maxVal = a[x][y][z];
+                                myMaxPos.clear();
+                            }
+                            int[] newPos = {x, y, z};
+                            myMaxPos.add(newPos);
+                            newMax = true;
+                        }
+                    }
+                    /*if (newMin) {
+                        newMinVal = at(minRef.home(), minRef.get().get());
+                    }*/
+                });
+                startVal += blockSize;
+                placeNum = (placeNum + 1) % p;
+                if (placeNum == 0) {
+                    blockSize *= 1;
+                }
+            }
         });
+
+        long minMaxEnd = System.nanoTime();
+        System.out.println("Min- and Max-Values: time=" + ((minMaxEnd - minMaxStart) / 1E9D) + " sec");
+        System.out.println();
 
         /*for (int x = 0; x < n; x++) {
             for (int y = 0; y < n; y++) {
@@ -330,7 +442,7 @@ public class Squares {
         System.out.println("Process time=" + ((end - start) / 1E9D) + " sec");
     }
 
-    // with saving prime numbers
+// with saving prime numbers
     /*public static long findPrimeNumber(int x) {
         if (x <= maxPrimePos) {
             return primes[x];
@@ -362,7 +474,7 @@ public class Squares {
         return (--a);
     }*/
 
-    // with ArrayList
+// with ArrayList
     /*public static long findPrimeNumber(int x) {
         if (x <= maxPrimePos) {
             return primes.get(x);
@@ -397,16 +509,17 @@ public class Squares {
 
     // with ArrayList and GlobalRef
     public static long findPrimeNumber(int x) {
-        if (x <= maxPrimePosRef.get().get()) {
+        int mPP = maxPrimePosRef.get().get();
+        if (x <= mPP) {
             return primeRef.get().get(x);
         }
-        int count = maxPrimePosRef.get().get();
+        int count = mPP;
         long a;
-        if (maxPrimePosRef.get().get() == 0) {
+        if (mPP == 0) {
             a = 2;
-            primeRef.get().add(0, 0l);
+            at(primeRef.home(), () -> primeRef.get().add(0, 0l));
         } else {
-            a = primeRef.get().get(maxPrimePosRef.get().get()) + 1;
+            a = primeRef.get().get(mPP) + 1;
         }
         while (count < x) {
             long b = 2;
@@ -421,7 +534,9 @@ public class Squares {
             if (prime > 0) {
                 count++;
                 primeRef.get().add(count, a);
-                maxPrimePosRef.get().addAndGet(1);//set(maxPrimePosRef.get().get() + 1);
+                at(maxPrimePosRef.home(), () -> {
+                    maxPrimePosRef.get().addAndGet(1);//set(maxPrimePosRef.get().get() + 1);
+                });
             }
             a++;
         }
