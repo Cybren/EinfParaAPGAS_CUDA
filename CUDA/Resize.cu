@@ -133,6 +133,10 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
                 seams[y * numSeams + threadNum] = min(min(sumBuffer[y * inputWidth + prevX - 1], sumBuffer[y * inputWidth + prevX]), sumBuffer[y * inputWidth + prevX + 1]).xPos;
             }
         }
+        /*seams[(height - 1) * numSeams + threadNum] = 1;
+        for (int y = height - 2; y > -1; y--) {
+            seams[y * numSeams + threadNum] = 1;
+        }*/
     }
     if (threadNum == 0) {
         printf("increaseWidth after seams\n");
@@ -140,21 +144,37 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
     __syncthreads();
     //create final Image
     if (threadNum < height) {//Mehr Threads möglich (*3) und Jeder Thread eine Farbe
-        int oldX = 0;
+        int oldX = -1;
         int seamIndex = 0;
         int row = threadNum * outputWidth * 3;
-        for (int x = 0; x < outputWidth; x++) {
+        for (int x = 1; x < outputWidth; x++) {
+            oldX++;
+            /*oldX = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? oldX: oldX + 1;
+            outputImageData[row + x * 3]     = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3]     : imageData[row + oldX * 3];
+            outputImageData[row + x * 3 + 1] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 1] : imageData[row + oldX * 3 + 1];
+            outputImageData[row + x * 3 + 2] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 2] : imageData[row + oldX * 3 + 2];
+            seamIndex = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? seamIndex + 1 : seamIndex;*/
             if (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) {
                 //printf("thread %d at %d (%d) copy seam %d at %d\n", threadNum, x, oldX, threadNum * numSeams + seamIndex, seams[threadNum * numSeams + seamIndex]);
-                outputImageData[row + x * 3]     = outputImageData[row + (x - 1) * 3];
-                outputImageData[row + x * 3 + 1] = outputImageData[row + (x - 1) * 3 + 1];
-                outputImageData[row + x * 3 + 2] = outputImageData[row + (x - 1) * 3 + 2];
+                outputImageData[row + x * 3] = 0; // outputImageData[row + (x - 1) * 3];
+                outputImageData[row + x * 3 + 1] = 255; // outputImageData[row + (x - 1) * 3 + 1];
+                outputImageData[row + x * 3 + 2] = 255; // outputImageData[row + (x - 1) * 3 + 2];
                 seamIndex++;
-            }else{
-                outputImageData[row + x * 3] = 0;// imageData[row + oldX * 3];
-                outputImageData[row + x * 3 + 1] = 0;// imageData[row + oldX * 3 + 1];
-                outputImageData[row + x * 3 + 2] = 0; // imageData[row + oldX * 3 + 2];
-                oldX++;
+            }else {
+                
+                if (oldX == 0) {
+                    outputImageData[row + x * 3] = 255;
+                    outputImageData[row + x * 3 + 1] = 255;
+                    outputImageData[row + x * 3 + 2] = 255;
+                }else if (inputWidth - 1 == oldX) {
+                    outputImageData[row + x * 3] = 0;
+                    outputImageData[row + x * 3 + 1] = 0;
+                    outputImageData[row + x * 3 + 2] = 0;
+                }else {
+                    outputImageData[row + x * 3] = 0;  //imageData[row + oldX * 3];
+                    outputImageData[row + x * 3 + 1] = 255; //imageData[row + oldX * 3 + 1];
+                    outputImageData[row + x * 3 + 2] = 0; //imageData[row + oldX * 3 + 2];
+                }
             }
         }
     }
@@ -181,7 +201,7 @@ int main(int argc, char* argv[]) {
     clock_t start = clock();
     //TO-DO use multiple GPUS
     //catch cuda errors
-    cudaError_t cudaStatus = cudaSetDevice(0);
+    cudaError_t cudaStatus = cudaSetDevice(1);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaSetDevice failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
     int outputPixelBufferSize = (input->width + numSeams) * input->height;
@@ -204,7 +224,6 @@ int main(int argc, char* argv[]) {
     output->numComponents = input->numComponents;
     output->width = input->width + numSeams;
     output->height = input->height;
-    output->lpData = (unsigned char*)malloc(sizeof(unsigned char) * outputPixelBufferSize * 3);
 
     //allocate nessessary memory on GPU
     cudaStatus = cudaMalloc(&d_inputImageData, sizeof(unsigned char) * inputPixelBufferSize * 3);
@@ -246,9 +265,6 @@ int main(int argc, char* argv[]) {
     quicksort(startBuffer, 0, width);
     cudaStatus = cudaMemcpy((d_sumBuffer + width * (height - 1)), startBuffer, width, cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy sumBuffer -> d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch quicksort failed: %s\n", cudaGetErrorString(cudaStatus)); }
 
     //start final kernel to create outputImage
     dim3 threadsPerBlock3(blocksize3);
@@ -272,5 +288,7 @@ int main(int argc, char* argv[]) {
     clock_t end = clock();
     printf("Execution time: %4.2f sec\n", (double)((double)(end - start) / CLOCKS_PER_SEC));
     storeJpegImageFile(output, outputFile);
+    free(startBuffer);
+    free(outputImageData);
     return 0;
 }
