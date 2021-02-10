@@ -114,7 +114,7 @@ public class Squares {
                     startVal += blockSize;
                     placeNum = (placeNum + 1) % p;
                     if (placeNum == 0) {
-                        placeNum += 1;
+                        //placeNum += 1;
                         blockSize *= 1; // anpassen
                     }
                 }
@@ -446,43 +446,15 @@ public class Squares {
         System.out.println("Min- and Max-Values: time=" + ((minMaxEnd - minMaxStart) / 1E9D) + " sec");
         System.out.println();
 
-        /*for (int x = 0; x < n; x++) {
-            for (int y = 0; y < n; y++) {
-                for (int z = 0; z < n; z++) {
-                    if (a[x][y][z] <= min) {
-                        if (a[x][y][z] < min) {
-                            minPos.clear();
-                        }
-                        min = a[x][y][z];
-                        ArrayList<Integer> newMinPos = new ArrayList<>();
-                        newMinPos.add(x);
-                        newMinPos.add(y);
-                        newMinPos.add(z);
-                        minPos.add(newMinPos);
-                    }
-                    if (a[x][y][z] >= max) {
-                        if (a[x][y][z] > max) {
-                            maxPos.clear();
-                        }
-                        max = a[x][y][z];
-                        ArrayList<Integer> newMaxPos = new ArrayList<>();
-                        newMaxPos.add(x);
-                        newMaxPos.add(y);
-                        newMaxPos.add(z);
-                        maxPos.add(newMaxPos);
-                    }
-                }
-            }
-        }*/
 
         System.out.print("Min=" + minimum + " ");
         for (int[] pos : minPos) {
-            System.out.print("(" + pos[0] + ", "+ pos[1] + ", "+ pos[2] + ") ");
+            System.out.print("(" + pos[0] + ", " + pos[1] + ", " + pos[2] + ") ");
         }
         System.out.println();
         System.out.print("Max=" + maximum + " ");
         for (int[] pos : maxPos) {
-            System.out.print("(" + pos[0] + ", "+ pos[1] + ", "+ pos[2] + ") ");
+            System.out.print("(" + pos[0] + ", " + pos[1] + ", " + pos[2] + ") ");
         }
         System.out.println();
 
@@ -492,25 +464,30 @@ public class Squares {
 
     // with ArrayList and GlobalRef
     public static long findPrimeNumber(int x) {
-        System.out.println(primeRef.get().size() + ": " + primeRef.get());
-        int mPP = maxPrimePosRef.get().get();
-        if (x <= mPP) {
-            System.out.println(x + " " + mPP);
-            return primeRef.get().get(x);
+        int mPP = at(primeRef.home(), () -> primeRef.get().size()) - 1;//maxPrimePosRef.get().get();
+        if (mPP < 0) {
+            mPP = 0;
+        }
+        if (x < mPP) {
+            //System.out.println("  x=" + x + ": " + primeRef.get());
+            return at(primeRef.home(), () -> primeRef.get().get(x));
         }
         int count = mPP;
         long a;
-        if (mPP == 0) {
+        if (mPP <= 0) {
             a = 2;
             at(primeRef.home(), () -> {
-                synchronized (primeRef.get()){
+                synchronized (primeRef.get()) {
                     if (primeRef.get().size() <= 0) {
                         primeRef.get().add(0, 0l);
                     }
                 }
             });
         } else {
-            a = primeRef.get().get(mPP) + 1;
+            //System.out.println("mPP=" + mPP + ": " + primeRef.get());
+            final int fMPP = mPP;
+            a = at(primeRef.home(), () -> primeRef.get().get(fMPP));
+            a += 1;
         }
         while (count < x) {
             long b = 2;
@@ -527,9 +504,9 @@ public class Squares {
                 final long prim = a;
                 final int c = count;
                 at(primeRef.home(), () -> {
-                    synchronized (primeRef.get()){
+                    synchronized (primeRef.get()) {
                         if (primeRef.get().size() <= c) {
-                            System.out.println("c = " + c + ", prim = " + prim);
+                            //System.out.println("c = " + c + ", prim = " + prim);
                             primeRef.get().add(c, prim); // Achtung, hier ist noch ein Sync-Fehler!!!
                         }
                     }
