@@ -28,8 +28,8 @@ struct container{
  */
 
 
-int part(struct container list[], int left, int right) {
-    unsigned int pivot = list[right].value;
+int partValue(struct container list[], int left, int right) {
+    int pivot = list[right].value;
     int x = (left - 1);
     for (int i = left; i < right; ++i) {
         if (list[i].value < pivot) {
@@ -46,12 +46,39 @@ int part(struct container list[], int left, int right) {
 }
 
 
-void quicksort(struct container* list, int left, int right) {
+void quicksortValue(struct container* list, int left, int right) {
     if (left < right) {
-        unsigned int pivot = part(list, left, right);
+        unsigned int pivot = partValue(list, left, right);
 
-        quicksort(list, left, pivot - 1);
-        quicksort(list, pivot + 1, right);
+        quicksortValue(list, left, pivot - 1);
+        quicksortValue(list, pivot + 1, right);
+    }
+}
+
+int partX(struct container list[], int left, int right) {
+    short pivot = list[right].xPos;
+    int x = (left - 1);
+    for (int i = left; i < right; ++i) {
+        if (list[i].xPos < pivot) {
+            x++;
+            struct container temp = list[i];
+            list[i] = list[x];
+            list[x] = temp;
+        }
+    }
+    struct container temp = list[x + 1];
+    list[x + 1] = list[right];
+    list[right] = temp;
+    return x + 1;
+}
+
+
+void quicksortX(struct container* list, int left, int right) {
+    if (left < right) {
+        int pivot = partValue(list, left, right);
+
+        quicksortValue(list, left, pivot - 1);
+        quicksortValue(list, pivot + 1, right);
     }
 }
 
@@ -72,7 +99,7 @@ void calcPixelEnergies(unsigned char* imageData, unsigned short* energyBuffer, i
         printf("calcPixelEnergies\n");
     }
     if (y < height && x < width) {
-        unsigned int sum = 0;
+        unsigned short sum = 0;
         for (int i = -1; i < 2; i++) {
             for (int j = -1; j < 2; j++) {
                 sum +=  abs(imageData[y * width * 3 + x * 3 + 0] - imageData[((y + j) % height) * width * 3 + ((x + i) % width) * 3 + 0]) + //R-Value
@@ -81,6 +108,18 @@ void calcPixelEnergies(unsigned char* imageData, unsigned short* energyBuffer, i
             }
         }
         energyBuffer[y * width + x] = sum;
+    }
+    __syncthreads();
+    if (x == 0 && y == 0) {
+        printf("width %d height %d\n", width, height);
+        for (int i = 0; i < height; i++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                printf("%d ", energyBuffer[i * width + x]);
+            }
+            printf("\n");
+        }
     }
 }
 
@@ -117,12 +156,9 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
     int tx = threadIdx.x;
     int threadNum = bx * blocksize3 + tx;
     int outputWidth = inputWidth + numSeams;
-    if (threadNum == 0) {
-        printf("increaseWidth numSeams: %d inwidth: %d outwidth: %d height: %d\n", numSeams, inputWidth, outputWidth, height);
-    }
     //find seams
     if (threadNum < numSeams) {//sumBuffer sizeof(container) * input->width * input->height; seams sizeof(unsigned short) * input->height * numSeams
-        seams[(height - 1) * numSeams + threadNum] = sumBuffer[inputWidth * (height-1) + threadNum].xPos;
+        //seams[(height - 1) * numSeams + threadNum] = sumBuffer[inputWidth * (height-1) + threadNum].xPos;
         for (int y = height-2; y > -1; y--){
             int prevX = seams[threadNum * height + y + 1];
             if (prevX == inputWidth - 1) { // rightmost pixel of a row
@@ -139,7 +175,9 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
         }*/
     }
     if (threadNum == 0) {
-        printf("increaseWidth after seams\n");
+        for (int i = 0; i < height; i++) {
+            //printf("seam: %d \n", seams[i*numSeams]);
+        }
     }
     __syncthreads();
     //create final Image
@@ -147,34 +185,24 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
         int oldX = -1;
         int seamIndex = 0;
         int row = threadNum * outputWidth * 3;
-        for (int x = 1; x < outputWidth; x++) {
-            oldX++;
+        for (int x = 0; x < outputWidth; x++) {
             /*oldX = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? oldX: oldX + 1;
             outputImageData[row + x * 3]     = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3]     : imageData[row + oldX * 3];
             outputImageData[row + x * 3 + 1] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 1] : imageData[row + oldX * 3 + 1];
             outputImageData[row + x * 3 + 2] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 2] : imageData[row + oldX * 3 + 2];
             seamIndex = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? seamIndex + 1 : seamIndex;*/
-            if (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) {
+            if (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams) {
                 //printf("thread %d at %d (%d) copy seam %d at %d\n", threadNum, x, oldX, threadNum * numSeams + seamIndex, seams[threadNum * numSeams + seamIndex]);
-                outputImageData[row + x * 3] = 0; // outputImageData[row + (x - 1) * 3];
-                outputImageData[row + x * 3 + 1] = 255; // outputImageData[row + (x - 1) * 3 + 1];
-                outputImageData[row + x * 3 + 2] = 255; // outputImageData[row + (x - 1) * 3 + 2];
+                //kopieren klappt
+                outputImageData[row + x * 3] = 255; //outputImageData[row + (x - 1) * 3];
+                outputImageData[row + x * 3 + 1] = 0; //outputImageData[row + (x - 1) * 3 + 1];
+                outputImageData[row + x * 3 + 2] = 0; //outputImageData[row + (x - 1) * 3 + 2];
                 seamIndex++;
             }else {
-                
-                if (oldX == 0) {
-                    outputImageData[row + x * 3] = 255;
-                    outputImageData[row + x * 3 + 1] = 255;
-                    outputImageData[row + x * 3 + 2] = 255;
-                }else if (inputWidth - 1 == oldX) {
-                    outputImageData[row + x * 3] = 0;
-                    outputImageData[row + x * 3 + 1] = 0;
-                    outputImageData[row + x * 3 + 2] = 0;
-                }else {
-                    outputImageData[row + x * 3] = 0;  //imageData[row + oldX * 3];
-                    outputImageData[row + x * 3 + 1] = 255; //imageData[row + oldX * 3 + 1];
-                    outputImageData[row + x * 3 + 2] = 0; //imageData[row + oldX * 3 + 2];
-                }
+                oldX++;
+                outputImageData[row + x * 3] = imageData[row + (oldX - threadNum * numSeams) * 3];
+                outputImageData[row + x * 3 + 1] = imageData[row + (oldX - threadNum * numSeams) * 3 + 1];
+                outputImageData[row + x * 3 + 2] = imageData[row + (oldX - threadNum * numSeams) * 3 + 2];
             }
         }
     }
@@ -188,6 +216,8 @@ void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, str
 }
 
 int main(int argc, char* argv[]) {
+    printf("-1 % 64 is: %d ", -1 % 64);
+    return 0;
     printf("start\n");
     if (argc != 4) {
         printf("Usage: %s inputJPEG outputJPEG numSeams\n", argv[0]);
@@ -201,7 +231,7 @@ int main(int argc, char* argv[]) {
     clock_t start = clock();
     //TO-DO use multiple GPUS
     //catch cuda errors
-    cudaError_t cudaStatus = cudaSetDevice(1);
+    cudaError_t cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaSetDevice failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
     int outputPixelBufferSize = (input->width + numSeams) * input->height;
@@ -242,6 +272,7 @@ int main(int argc, char* argv[]) {
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy input->lpData -> d_inputImageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
     dim3 threadsPerBlock1(blockWidth1, blockHeight1);
     dim3 numBlocks1(ceil(input->width / threadsPerBlock1.x), ceil(input->height / threadsPerBlock1.y));
+    printf("width:%d  height: %d\n", input->width, input->height);
     calcPixelEnergies <<<numBlocks1, threadsPerBlock1>>>(d_inputImageData, d_energyBuffer, input->width, input->height);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "calcPixelEnergies launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
@@ -262,8 +293,9 @@ int main(int argc, char* argv[]) {
     printf("wanna calculate seams\n");
     cudaStatus = cudaMemcpy(startBuffer, (d_sumBuffer + width * (height - 1)), width, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_sumBuffer -> sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    quicksort(startBuffer, 0, width);
-    cudaStatus = cudaMemcpy((d_sumBuffer + width * (height - 1)), startBuffer, width, cudaMemcpyHostToDevice);
+    quicksortValue(startBuffer, 0, width);
+    quicksortX(startBuffer, 0, numSeams);
+    cudaStatus = cudaMemcpy((d_seams + numSeams * (height - 1)), startBuffer, numSeams, cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy sumBuffer -> d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
     //start final kernel to create outputImage
