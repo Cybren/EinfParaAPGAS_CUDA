@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
-#include <string.h>
 #include "image.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -130,6 +129,22 @@ struct container*calculateMinEnergySums(unsigned short *pixelEnergies, int width
         }
         //printf("\n");
     }
+    int y = 1;
+        printf("calculateMinEnergySums\n");
+        for (int i = 0; i < width; i++) {
+            int temp = 0;
+             if (i == width - 1) { // rightmost pixel of a row
+                temp = pixelEnergies[y * width + i] + MIN(minEnergySums[(y - 1) * width + i - 1].value, minEnergySums[(y - 1) * width + i].value);
+                printf("%u + %u oder %u = %u\n", pixelEnergies[y * width + i], minEnergySums[(y - 1) * width + i - 1].value, minEnergySums[(y - 1) * width + i].value, temp);
+            }else if (i == 0) { // leftmost pixel of a row
+                temp = pixelEnergies[y * width + i] + MIN(minEnergySums[(y - 1) * width + i].value, minEnergySums[(y - 1) * width + i + 1].value);
+                printf("%u + %u oder %u = %u\n", pixelEnergies[y * width + i], minEnergySums[(y - 1) * width + i].value, minEnergySums[(y - 1) * width + i + 1].value, temp);
+            }else {
+                temp = pixelEnergies[y * width + i] + MIN(MIN(minEnergySums[(y - 1) * width + i - 1].value, minEnergySums[(y - 1) * width + i].value), minEnergySums[(y - 1) * width + i + 1].value);
+                printf("%u + %u oder %u oder %u = %d\n", pixelEnergies[y * width + i], minEnergySums[(y - 1) * width + i - 1].value, minEnergySums[(y - 1) * width + i].value, minEnergySums[(y - 1) * width + i + 1].value, temp);
+            }
+        }
+        printf("\n");
     return output;
 }
 
@@ -176,20 +191,20 @@ struct imgRawImage *increaseWidth(struct imgRawImage *image, int numSeams) {
   for (int i = 0; i < height; i++){
       int oldX = -1;
       int seamIndex = 0;
-      int row = i * (width + numSeams) * 3;
+      int outputRow = threadNum * (inputWidth + numSeams) * 3;
+      int inputRow = threadNum * inputWidth * 3;
       for (int x = 0; x < (width + numSeams); x++) {
-          if (x > 0 && oldX == seams[i * numSeams + seamIndex] && seamIndex < numSeams) {
-              //printf("thread %d at %d (%d) copy seam %d at %d\n", threadNum, x, oldX, threadNum * numSeams + seamIndex, seams[threadNum * numSeams + seamIndex]);
-              //kopieren klappt
-              outputImageData[row + x * 3] = outputImageData[row + (x - 1) * 3];
-              outputImageData[row + x * 3 + 1] = outputImageData[row + (x - 1) * 3 + 1];
-              outputImageData[row + x * 3 + 2] = outputImageData[row + (x - 1) * 3 + 2];
+          if (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams) {
+              outputData[outputRow + x * 3] = outputData[outputRow + (x - 1) * 3];
+              outputData[outputRow + x * 3 + 1] = outputData[outputRow + (x - 1) * 3 + 1];
+              outputData[outputRow + x * 3 + 2] = outputData[outputRow + (x - 1) * 3 + 2];
               seamIndex++;
-          }else {
+          }
+          else {
               oldX++;
-              outputImageData[row + x * 3] = image->lpData[row + (oldX - i * numSeams) * 3];
-              outputImageData[row + x * 3 + 1] = image->lpData[row + (oldX - i * numSeams) * 3 + 1];
-              outputImageData[row + x * 3 + 2] = image->lpData[row + (oldX - i * numSeams) * 3 + 2];
+              outputData[outputRow + x * 3] = inputData[inputRow + oldX * 3];
+              outputData[outputRow + x * 3 + 1] = inputData[inputRow + oldX * 3 + 1];
+              outputData[outputRow + x * 3 + 2] = inputData[inputRow + oldX * 3 + 2];
           }
       }
   }
