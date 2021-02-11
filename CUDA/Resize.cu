@@ -2,37 +2,32 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include <stdbool.h>
 #include "image.cuh"
 #ifdef _WIN32
 #include "cuda_runtime.h"
 #endif // _WIN32
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
 #define blockWidth1 32
 #define blockHeight1 16
 
 #define blockWidth2 128
 #define blockHeight2 4
 
-#define blocksize3 64 // 1080/15 = 72 => 64
+#define blocksize3 32
 
-struct container{
-    int value;
-    short xPos;
+#define blocksize4 64 // 1080/15 = 72 => 64
+
+struct container {
+    unsigned int value;
+    int xPos;
 };
-
-/*Notes
-* types short instead of int? (width height, pixelEnergy) half of MemoryUsage
-* #1: Order?
- */
-
 
 int partValue(struct container list[], int left, int right) {
     int pivot = list[right].value;
     int x = (left - 1);
     for (int i = left; i < right; ++i) {
-        if (list[i].value < pivot) {
+        if (list[i].value <= pivot) {
             x++;
             struct container temp = list[i];
             list[i] = list[x];
@@ -55,272 +50,284 @@ void quicksortValue(struct container* list, int left, int right) {
     }
 }
 
-int partX(struct container list[], int left, int right) {
-    short pivot = list[right].xPos;
+int partint(unsigned int list[], int left, int right) {
+    unsigned int pivot = list[right];
     int x = (left - 1);
     for (int i = left; i < right; ++i) {
-        if (list[i].xPos < pivot) {
+        if (list[i] < pivot) {
             x++;
-            struct container temp = list[i];
+            unsigned int temp = list[i];
             list[i] = list[x];
             list[x] = temp;
         }
     }
-    struct container temp = list[x + 1];
+    unsigned int temp = list[x + 1];
     list[x + 1] = list[right];
     list[right] = temp;
     return x + 1;
 }
 
 
-void quicksortX(struct container* list, int left, int right) {
+void quicksortint(unsigned int* list, int left, int right) {
     if (left < right) {
-        int pivot = partValue(list, left, right);
+        int pivot = partint(list, left, right);
 
-        quicksortValue(list, left, pivot - 1);
-        quicksortValue(list, pivot + 1, right);
+        quicksortint(list, left, pivot - 1);
+        quicksortint(list, pivot + 1, right);
     }
 }
 
 __device__
-struct container min(struct container container1, struct container container2) {
+unsigned int MIN(int a, int b) {
+    return a < b ? a : b;
+}
+
+__device__
+int MAX(int a, int b) {
+    return a > b ? a : b;
+}
+
+__device__
+int MOD(int a, int b) {
+    return ((a % b )+b) % b;
+}
+
+__device__
+struct container minContainer(struct container container1, struct container container2) {
     return container1.value < container2.value ? container1 : container2;
 }
 
+//checked
 __global__
-void calcPixelEnergies(unsigned char* imageData, unsigned short* energyBuffer, int width, int height) {
-    short bx = blockIdx.x;
-    short by = blockIdx.y;
-    short tx = threadIdx.x;
-    short ty = threadIdx.y;
-    short y = by * blockHeight1 + ty;
-    short x = bx * blockWidth1 + tx;
-    if (x == 0 && y == 0) {
-        printf("calcPixelEnergies\n");
-    }
+void calculatePixelEnergies(unsigned char* inputData, unsigned int* pixelEnergies, int width, int height) {
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int y = by * blockHeight1 + ty;
+    int x = bx * blockWidth1 + tx;
+    int sum;
+    int actualY;
+    int actualX;
     if (y < height && x < width) {
-        unsigned short sum = 0;
-        for (int i = -1; i < 2; i++) {
-            for (int j = -1; j < 2; j++) {
-                sum +=  abs(imageData[y * width * 3 + x * 3 + 0] - imageData[((y + j) % height) * width * 3 + ((x + i) % width) * 3 + 0]) + //R-Value
-                        abs(imageData[y * width * 3 + x * 3 + 1] - imageData[((y + j) % height) * width * 3 + ((x + i) % width) * 3 + 1]) + //G-Value
-                        abs(imageData[y * width * 3 + x * 3 + 2] - imageData[((y + j) % height) * width * 3 + ((x + i) % width) * 3 + 2]);  //B-Value
+        sum = 0;
+        for (int offsetX = -1; offsetX < 2; offsetX++) {
+            for (int offsetY = -1; offsetY < 2; offsetY++) {
+                actualY = MOD((y + offsetY), height);
+                actualX = MOD((x + offsetX), width);
+                sum += abs(inputData[(y * width + x) * 3] - inputData[(actualY * width + actualX) * 3])
+                    + abs(inputData[(y * width + x) * 3 + 1] - inputData[(actualY * width + actualX) * 3 + 1])
+                    + abs(inputData[(y * width + x) * 3 + 2] - inputData[(actualY * width + actualX) * 3 + 2]);
             }
         }
-        energyBuffer[y * width + x] = sum;
-    }
-    __syncthreads();
-    if (x == 0 && y == 0) {
-        printf("width %d height %d\n", width, height);
-        for (int i = 0; i < height; i++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                printf("%d ", energyBuffer[i * width + x]);
-            }
-            printf("\n");
-        }
+        pixelEnergies[y * width + x] = sum;
     }
 }
 
+//checked
 __global__
-void calculateMinEnergySums(unsigned short* energyBuffer, struct container* sumBuffer, int width, int height) {
-    short bx = blockIdx.x;
-    short by = blockIdx.y;
-    short tx = threadIdx.x;
-    short ty = threadIdx.y;
-    short y = by * blockHeight2 + ty;
-    short x = bx * blockWidth2 + tx;
-    struct container newContainer;
-    if (x == 0 && y == 0) {
-        printf("calculateMinEnergySums\n");
-    }
+void calculateMinEnergySums(unsigned int* pixelEnergies, struct container* minEnergySums, int width, int height) {
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int y = by * blockHeight2 + ty;
+    int x = bx * blockWidth2 + tx;
     if (y < height && x < width) {
-        if (x == width - 1) { // rightmost pixel of a row
-            newContainer.value = energyBuffer[y * width + x] + MIN(energyBuffer[(y - 1) * width + x - 1], energyBuffer[(y - 1) * width + x]);
+        if (y == 0) {//branch divergenz
+            struct container newContainer;
+            newContainer.value = pixelEnergies[x];
             newContainer.xPos = x;
-        }else if (x == 0) { // leftmost pixel of a row
-            newContainer.value = energyBuffer[y * width + x] + MIN(energyBuffer[(y - 1) * width + x], energyBuffer[(y - 1) * width + x + 1]);
-            newContainer.xPos = x;
+            minEnergySums[x] = newContainer;
         }else {
-            newContainer.value = energyBuffer[y * width + x] + MIN(MIN(energyBuffer[(y - 1) * width + x - 1], energyBuffer[(y - 1) * width + x]), energyBuffer[(y - 1) * width + x + 1]);
+            struct container newContainer;
+            if (x == width - 1) { // rightmost pixel of a row
+                newContainer.value = pixelEnergies[y * width + x] + MIN(minEnergySums[(y - 1) * width + x - 1].value, minEnergySums[(y - 1) * width + x].value);
+            }else if (x == 0) { // leftmost pixel of a row
+                newContainer.value = pixelEnergies[y * width + x] + MIN(minEnergySums[(y - 1) * width + x].value, minEnergySums[(y - 1) * width + x + 1].value);
+            }else {
+                newContainer.value = pixelEnergies[y * width + x] + MIN(MIN(minEnergySums[(y - 1) * width + x - 1].value, minEnergySums[(y - 1) * width + x].value), minEnergySums[(y - 1) * width + x + 1].value);
+            }
             newContainer.xPos = x;
+            minEnergySums[y * width + x] = newContainer;
         }
-        sumBuffer[y * width + x] = newContainer;
     }
 }
-
 __global__
-void increaseWidth(unsigned char* imageData, unsigned char* outputImageData, struct container* sumBuffer, unsigned short* seams, int numSeams, int inputWidth, int height) {
+void calcSeams(struct container* minEnergySums, unsigned int* seams, int inputWidth, int height, int numSeams) {
     int bx = blockIdx.x;
     int tx = threadIdx.x;
-    int threadNum = bx * blocksize3 + tx;
-    int outputWidth = inputWidth + numSeams;
-    //find seams
-    if (threadNum < numSeams) {//sumBuffer sizeof(container) * input->width * input->height; seams sizeof(unsigned short) * input->height * numSeams
-        //seams[(height - 1) * numSeams + threadNum] = sumBuffer[inputWidth * (height-1) + threadNum].xPos;
-        for (int y = height-2; y > -1; y--){
-            int prevX = seams[threadNum * height + y + 1];
+    int threadNum = bx * blocksize4 + tx;
+    if (threadNum < numSeams) {
+        for (int y = height - 2; y > -1; y--) {
+            unsigned int prevX = seams[(y + 1) * numSeams + threadNum];
             if (prevX == inputWidth - 1) { // rightmost pixel of a row
-                seams[y * numSeams + threadNum] = min(sumBuffer[y * inputWidth + prevX - 1], sumBuffer[y * inputWidth + prevX]).xPos;
+                seams[y * numSeams + threadNum] = minContainer(minEnergySums[y * inputWidth + prevX - 1], minEnergySums[y * inputWidth + prevX]).xPos;
             }else if (prevX == 0) { // leftmost pixel of a row
-                seams[y * numSeams + threadNum] = min(sumBuffer[y * inputWidth + prevX], sumBuffer[y * inputWidth + prevX + 1]).xPos;
+                seams[y * numSeams + threadNum] = minContainer(minEnergySums[y * inputWidth + prevX], minEnergySums[y * inputWidth + prevX + 1]).xPos;
             }else {
-                seams[y * numSeams + threadNum] = min(min(sumBuffer[y * inputWidth + prevX - 1], sumBuffer[y * inputWidth + prevX]), sumBuffer[y * inputWidth + prevX + 1]).xPos;
+                seams[y * numSeams + threadNum] = minContainer(minContainer(minEnergySums[y * inputWidth + prevX - 1], minEnergySums[y * inputWidth + prevX]), minEnergySums[y * inputWidth + prevX + 1]).xPos;
             }
         }
-        /*seams[(height - 1) * numSeams + threadNum] = 1;
-        for (int y = height - 2; y > -1; y--) {
-            seams[y * numSeams + threadNum] = 1;
-        }*/
     }
-    if (threadNum == 0) {
-        for (int i = 0; i < height; i++) {
-            //printf("seam: %d \n", seams[i*numSeams]);
-        }
-    }
-    __syncthreads();
-    //create final Image
-    if (threadNum < height) {//Mehr Threads möglich (*3) und Jeder Thread eine Farbe
+}
+
+__global__
+void increaseWidth(unsigned char *inputData, unsigned char *outputData, struct container* minEnergySums, unsigned int* seams, int inputWidth, int height, int numSeams) {
+    int bx = blockIdx.x;
+    int tx = threadIdx.x;
+    int threadNum = bx * blocksize4 + tx;
+    if(threadNum < height){
         int oldX = -1;
         int seamIndex = 0;
-        int row = threadNum * outputWidth * 3;
-        for (int x = 0; x < outputWidth; x++) {
-            /*oldX = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? oldX: oldX + 1;
-            outputImageData[row + x * 3]     = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3]     : imageData[row + oldX * 3];
-            outputImageData[row + x * 3 + 1] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 1] : imageData[row + oldX * 3 + 1];
-            outputImageData[row + x * 3 + 2] = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? outputImageData[row + (x - 1) * 3 + 2] : imageData[row + oldX * 3 + 2];
-            seamIndex = (oldX == seams[threadNum * numSeams + seamIndex] && x > 0 && seamIndex < numSeams) ? seamIndex + 1 : seamIndex;*/
+        int row = threadNum * (inputWidth + numSeams) * 3;
+        for (int x = 0; x < (inputWidth + numSeams); x++) {
+            /*bool condition = (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams);
+            oldX = condition ? oldX: oldX + 1;
+            outputData[row + x * 3] = condition ? outputData[row + (x - 1) * 3] : inputData[row + (oldX - threadNum * numSeams) * 3];
+            outputData[row + x * 3 + 1] = condition ? outputData[row + (x - 1) * 3 + 1] : inputData[row + (oldX - threadNum * numSeams) * 3 + 1];
+            outputData[row + x * 3 + 2] = condition ? outputData[row + (x - 1) * 3 + 2] : inputData[row + (oldX - threadNum * numSeams) * 3 + 2];
+            seamIndex = condition ? seamIndex + 1 : seamIndex;*/
             if (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams) {
-                //printf("thread %d at %d (%d) copy seam %d at %d\n", threadNum, x, oldX, threadNum * numSeams + seamIndex, seams[threadNum * numSeams + seamIndex]);
                 //kopieren klappt
-                outputImageData[row + x * 3] = 255; //outputImageData[row + (x - 1) * 3];
-                outputImageData[row + x * 3 + 1] = 0; //outputImageData[row + (x - 1) * 3 + 1];
-                outputImageData[row + x * 3 + 2] = 0; //outputImageData[row + (x - 1) * 3 + 2];
+                outputData[row + x * 3] = outputData[row + (x - 1) * 3];
+                outputData[row + x * 3 + 1] = outputData[row + (x - 1) * 3 + 1];
+                outputData[row + x * 3 + 2] = outputData[row + (x - 1) * 3 + 2];
                 seamIndex++;
             }else {
                 oldX++;
-                outputImageData[row + x * 3] = imageData[row + (oldX - threadNum * numSeams) * 3];
-                outputImageData[row + x * 3 + 1] = imageData[row + (oldX - threadNum * numSeams) * 3 + 1];
-                outputImageData[row + x * 3 + 2] = imageData[row + (oldX - threadNum * numSeams) * 3 + 2];
+                outputData[row + x * 3] = inputData[row + (oldX - threadNum * numSeams) * 3];
+                outputData[row + x * 3 + 1] = inputData[row + (oldX - threadNum * numSeams) * 3 + 1];
+                outputData[row + x * 3 + 2] = inputData[row + (oldX - threadNum * numSeams) * 3 + 2];
             }
         }
-    }
-    if (threadNum == 0) {
-        printf("increaseWidth at end\n");
-        printf("%d\n", outputImageData[0]);
-        printf("%d\n", outputImageData[200]);
-        printf("%d\n", outputImageData[444]);
-        printf("%d\n", outputImageData[1337]);
     }
 }
 
 int main(int argc, char* argv[]) {
-    printf("-1 % 64 is: %d ", -1 % 64);
-    return 0;
-    printf("start\n");
-    if (argc != 4) {
+    if (argc < 4) {
         printf("Usage: %s inputJPEG outputJPEG numSeams\n", argv[0]);
         return 0;
     }
     char* inputFile = argv[1];
     char* outputFile = argv[2];
     int numSeams = atoi(argv[3]);
-    //load image
+
     struct imgRawImage* input = loadJpegImageFile(inputFile);
     clock_t start = clock();
-    //TO-DO use multiple GPUS
-    //catch cuda errors
-    cudaError_t cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaSetDevice failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-
-    int outputPixelBufferSize = (input->width + numSeams) * input->height;
+    //host
     int width = input->width;
     int height = input->height;
-    int inputPixelBufferSize = input->width * input->height;
-    int sumBufferSize = sizeof(container) * input->width * input->height;
-    unsigned char* d_inputImageData;
-    unsigned char* d_outputImageData;
-    unsigned short* d_energyBuffer;
-    struct container* d_sumBuffer;
-    struct container* startBuffer;
-    unsigned short* d_seams;
-    startBuffer = (struct container*)malloc(sizeof(container)*input->width);
 
-    //create outputimage struct
-    struct imgRawImage outputObject;
-    struct imgRawImage* output = &outputObject;
-    unsigned char* outputImageData = (unsigned char*)malloc(sizeof(unsigned char) * outputPixelBufferSize * 3);
-    output->numComponents = input->numComponents;
-    output->width = input->width + numSeams;
-    output->height = input->height;
 
-    //allocate nessessary memory on GPU
-    cudaStatus = cudaMalloc(&d_inputImageData, sizeof(unsigned char) * inputPixelBufferSize * 3);
+    size_t inputDataSize_t = sizeof(unsigned char) * width * height * 3;
+    size_t outputDataSize_t = sizeof(unsigned char) * (width + numSeams)* height * 3;
+    size_t pixelEnergiesSize_t = sizeof(unsigned int) * width * height;
+    size_t minEnergySumsSize_t = sizeof(struct container) * height * width;
+    size_t seamsSize_t = sizeof(unsigned int) * numSeams * height;
+    size_t seamStartSize_t = sizeof(unsigned int) * numSeams;
+    size_t lastMinEnergySumsSize_t = sizeof(struct container) * width;
+
+    unsigned int* seamsStart = (unsigned int*)malloc(seamStartSize_t);
+    struct container* lastMinEnergySums = (struct container*)malloc(lastMinEnergySumsSize_t);
+    unsigned char* outputData = (unsigned char*)malloc(outputDataSize_t);
+    cudaError cudaStatus;
+    //device
+    unsigned char* d_inputData;
+    unsigned char* d_outputData;
+    unsigned int* d_pixelEnergies;
+    struct container* d_minEnergySums;
+    unsigned int* d_seams;
+
+    //allocate Devicememory
+    cudaStatus = cudaMalloc(&d_inputData, inputDataSize_t);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_inputData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    cudaMemset(d_inputData, 0, inputDataSize_t);
+    cudaStatus = cudaMalloc(&d_outputData, outputDataSize_t);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_inputImage failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaMalloc(&d_outputImageData, sizeof(unsigned char) * outputPixelBufferSize * 3);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_imageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaMalloc(&d_energyBuffer, sizeof(unsigned short) * inputPixelBufferSize);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_energyBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaMalloc(&d_sumBuffer, sumBufferSize);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaMalloc(&d_seams, sizeof(unsigned short) * input->height * numSeams);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_seams failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    
-    //start Kernel 1 to calculate all Energies
-    cudaStatus = cudaMemcpy(d_inputImageData, input->lpData, sizeof(unsigned char) * inputPixelBufferSize * 3, cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy input->lpData -> d_inputImageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    dim3 threadsPerBlock1(blockWidth1, blockHeight1);
-    dim3 numBlocks1(ceil(input->width / threadsPerBlock1.x), ceil(input->height / threadsPerBlock1.y));
-    printf("width:%d  height: %d\n", input->width, input->height);
-    calcPixelEnergies <<<numBlocks1, threadsPerBlock1>>>(d_inputImageData, d_energyBuffer, input->width, input->height);
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "calcPixelEnergies launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calcPixelEnergies failed: %s\n", cudaGetErrorString(cudaStatus)); }
+    cudaMemset(d_outputData, 0, outputDataSize_t);
+    cudaStatus = cudaMalloc(&d_pixelEnergies, pixelEnergiesSize_t);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_pixelEnergies failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    cudaMemset(d_pixelEnergies, 0, pixelEnergiesSize_t);
+    cudaStatus = cudaMalloc(&d_minEnergySums, minEnergySumsSize_t);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_minEnergySums failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    cudaMemset(d_minEnergySums, 0, minEnergySumsSize_t);
+    cudaStatus = cudaMalloc(&d_seams, seamsSize_t);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "malloc d_minEnergySums failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    cudaMemset(d_seams, 0, seamsSize_t);
 
-    //start kernel2 to calculate the lowest energy-sums
+    //start kernel1
+    cudaStatus = cudaMemcpy(d_inputData, input->lpData, inputDataSize_t, cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy input->lpData -> d_inputData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    dim3 threadsPerBlock1(blockWidth1, blockHeight1);
+    dim3 numBlocks1(ceil(width / (double)threadsPerBlock1.x), ceil(height / (double)threadsPerBlock1.y));
+
+    calculatePixelEnergies<<<numBlocks1, threadsPerBlock1>>>(d_inputData, d_pixelEnergies, width, height);
+
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "calculatePixelEnergies launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculatePixelEnergies failed: %s\n", cudaGetErrorString(cudaStatus)); }
+
+    //start kernel2
     dim3 threadsPerBlock2(blockWidth2, blockHeight2);
-    dim3 numBlocks2(ceil(input->width / threadsPerBlock2.x ), ceil(input->height / threadsPerBlock2.y));
-    calculateMinEnergySums <<<numBlocks2, threadsPerBlock2>>>(d_energyBuffer, d_sumBuffer, input->width, input->height);
+    dim3 numBlocks2(ceil(width / (double)threadsPerBlock2.x), ceil(height / (double)threadsPerBlock2.y));
+
+    calculateMinEnergySums<<<numBlocks2, threadsPerBlock2>>>(d_pixelEnergies, d_minEnergySums, width, height);
+
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "calculateMinEnergySums launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
-    //cudaFree(d_energyBuffer);
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculateMinEnergySums failed: %s\n", cudaGetErrorString(cudaStatus)); }
 
-    //calculate lowest energy-sums in last row on cpu
-    printf("wanna calculate seams\n");
-    cudaStatus = cudaMemcpy(startBuffer, (d_sumBuffer + width * (height - 1)), width, cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_sumBuffer -> sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    quicksortValue(startBuffer, 0, width);
-    quicksortX(startBuffer, 0, numSeams);
-    cudaStatus = cudaMemcpy((d_seams + numSeams * (height - 1)), startBuffer, numSeams, cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy sumBuffer -> d_sumBuffer failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    //calculate Seams
+    cudaStatus = cudaMemcpy(lastMinEnergySums, d_minEnergySums + width * (height - 1), lastMinEnergySumsSize_t, cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_minEnergySums -> lastMinEnergySums failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
-    //start final kernel to create outputImage
+    quicksortValue(lastMinEnergySums, 0, width - 1);
+    for (int i = 0; i < numSeams; i++) {
+        seamsStart[i] = lastMinEnergySums[i].xPos;
+    }
+    quicksortint(seamsStart, 0, numSeams - 1);
+    cudaStatus = cudaMemcpy(d_seams + numSeams * (height - 1), seamsStart, seamStartSize_t, cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy seamsStart -> d_seams failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+
+    //start kernel4
     dim3 threadsPerBlock3(blocksize3);
-    dim3 numBlocks3(ceil(output->height / blocksize3));
-    increaseWidth <<<numBlocks3, threadsPerBlock3>>>(d_inputImageData, d_outputImageData, d_sumBuffer, d_seams, numSeams, input->width, input->height);
+    dim3 numBlocks3(ceil(numSeams/ (double)blocksize3));
+    calcSeams<<<numBlocks3, threadsPerBlock3 >>>(d_minEnergySums, d_seams, width, height, numSeams);
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "calcSeams launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calcSeams failed: %s\n", cudaGetErrorString(cudaStatus)); }
+
+    //start kernel3
+    dim3 threadsPerBlock4(blocksize4);
+    dim3 numBlocks4(ceil(height / (double)blocksize4));
+    increaseWidth<<<numBlocks4, threadsPerBlock4>>>(d_inputData, d_outputData, d_minEnergySums, d_seams, width, height, numSeams);
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "increaseWidth launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch increaseWidth failed: %s\n", cudaGetErrorString(cudaStatus)); }
-    printf("after Kernel3\n");
-    //copy outputData to host
-    cudaStatus = cudaMemcpy(outputImageData, d_outputImageData, sizeof(unsigned char) * outputPixelBufferSize * 3, cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_imageData -> outputImageData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
-    output->lpData = outputImageData;
-    //free all allocated Memory
-    cudaFree(&d_inputImageData);
-    cudaFree(&d_outputImageData);
-    cudaFree(&d_sumBuffer);
+
+    //copy outputData and create image
+    cudaStatus = cudaMemcpy(outputData, d_outputData, outputDataSize_t, cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_outputData -> outputData failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
+    input->width = width + numSeams;
+    input->lpData = outputData;
+
+    //free Memory
+    cudaFree(&d_inputData);
+    cudaFree(&d_outputData);
+    cudaFree(&d_pixelEnergies);
+    cudaFree(&d_minEnergySums);
     cudaFree(&d_seams);
-    cudaFree(&d_energyBuffer);
+
     clock_t end = clock();
     printf("Execution time: %4.2f sec\n", (double)((double)(end - start) / CLOCKS_PER_SEC));
-    storeJpegImageFile(output, outputFile);
-    free(startBuffer);
-    free(outputImageData);
+    storeJpegImageFile(input, outputFile);
+    free(seamsStart);
+    free(lastMinEnergySums);
+    free(outputData);
     return 0;
 }
