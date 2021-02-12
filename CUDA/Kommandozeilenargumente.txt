@@ -1,0 +1,4 @@
+kompilieren:
+nvcc group2.Resize.cu image.cu -o group2.Resize -ljpeg -lm
+ausführen:
+./group2.Resize moon.jpg newMoon.jpg 50
