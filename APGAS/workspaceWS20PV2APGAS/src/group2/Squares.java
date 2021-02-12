@@ -67,7 +67,6 @@ public class Squares {
             long iterationStart = System.nanoTime();
 
             // compute zValue
-            //long zValStart = System.nanoTime();
             finish(() -> {
                 int startVal = 0;
                 int stopVal = n * n;
@@ -131,11 +130,8 @@ public class Squares {
                 }
             });
 
-            //long zValEnd = System.nanoTime();
-            //System.out.println("zValue : time=" + ((zValEnd - zValStart) / 1E9D) + " sec");
 
             // compute meanValue
-            //long meanValStart = System.nanoTime();
             finish(() -> {
                 int startVal = 0;
                 int stopVal = n * n;
@@ -208,11 +204,8 @@ public class Squares {
                 }
             });
 
-            //long meanValEnd = System.nanoTime();
-            //System.out.println("meanValue : time=" + ((meanValEnd - meanValStart) / 1E9D) + " sec");
 
             // compute new a array
-            //long aStart = System.nanoTime();
             final int iteration = currentIteration;
             finish(() -> {
                 int startVal = 0;
@@ -285,11 +278,8 @@ public class Squares {
                 }
             });
 
-            //long aEnd = System.nanoTime();
-            //System.out.println("new a : time=" + ((aEnd - aStart) / 1E9D) + " sec");
 
-
-            // output of meanValue - matrix
+            // output of meanValue
             if (verbose == 1) {
                 for (int x = 0; x < n; x++) {
                     for (int y = 0; y < n; y++) {
@@ -315,8 +305,6 @@ public class Squares {
         GlobalRef<AtomicInteger> maxRef = new GlobalRef<>(maximum);
         GlobalRef<ConcurrentHashMap<Integer, ArrayList<Position>>> minPosRef = new GlobalRef<>(minPos);
         GlobalRef<ConcurrentHashMap<Integer, ArrayList<Position>>> maxPosRef = new GlobalRef<>(maxPos);
-
-        //long minMaxStart = System.nanoTime();
 
         finish(() -> {
             int startVal = 0;
@@ -359,7 +347,7 @@ public class Squares {
                                 newMin = true;
                             }
 
-                            // search for values <= myMaxValue
+                            // search for values >= myMaxValue
                             if (a[x][y][z] >= myMaxVal) {
                                 if (a[x][y][z] > myMaxVal) {
                                     myMaxVal = a[x][y][z];
@@ -373,12 +361,16 @@ public class Squares {
                         if (newMin) {
                             final int fmin = myMinVal;
                             final ArrayList<Position> fMinPos = myMinPos;
+
+                            // update global minimum
                             final int globalMinVal = at(minRef.home(), () -> {
                                 if (fmin < minRef.get().get()) {
                                     minRef.get().getAndSet(fmin);
                                 }
                                 return minRef.get().get();
                             });
+
+                            // update positions of global minimum
                             asyncAt(minPosRef.home(), () -> {
                                 if (fmin <= globalMinVal) {
                                     minPosRef.get().putIfAbsent(fmin, new ArrayList<Position>());
@@ -391,12 +383,16 @@ public class Squares {
                         if (newMax) {
                             final int fmax = myMaxVal;
                             final ArrayList<Position> fMaxPos = myMaxPos;
+
+                            // update global maximum
                             final int globalMaxVal = at(maxRef.home(), () -> {
                                 if (fmax > maxRef.get().get()) {
                                     maxRef.get().getAndSet(fmax);
                                 }
                                 return maxRef.get().get();
                             });
+
+                            // update positions of global maximum
                             asyncAt(maxPosRef.home(), () -> {
                                 if (fmax >= globalMaxVal) {
                                     maxPosRef.get().putIfAbsent(fmax, new ArrayList<Position>());
@@ -416,10 +412,8 @@ public class Squares {
         ArrayList<Position> minimumPos = minPos.get(minimum.get());
         ArrayList<Position> maximumPos = maxPos.get(maximum.get());
 
-        long minMaxEnd = System.nanoTime();
-        System.out.println("Min- and Max-Values: time=" + ((minMaxEnd - minMaxStart) / 1E9D) + " sec");
-        System.out.println();
 
+        // sort and output positions of minimum
         Collections.sort(minimumPos);
         System.out.print("Min=" + minimum + " ");
         for (Position pos : minimumPos) {
@@ -427,6 +421,7 @@ public class Squares {
         }
         System.out.println();
 
+        // sort and output positions of maximum
         Collections.sort(maximumPos);
         System.out.print("Max=" + maximum + " ");
         for (Position pos : maximumPos) {
@@ -436,19 +431,23 @@ public class Squares {
 
         long end = System.nanoTime();
         System.out.println("Process time=" + ((end - start) / 1E9D) + " sec");
-
-        //System.out.println(primes + " Länge: " + primes.size());
     }
 
     // with ArrayList and GlobalRef
     public static long findPrimeNumber(int x) {
+
+        // get list of primes
         List<Long> myPrimes = primeRef.get();
         int maxPrimePos = Math.max(myPrimes.size() - 1, 0);
+
+        // if prime(x) already computed: return
         if (x <= maxPrimePos) {
             return myPrimes.get(x);
         }
+
         int count = maxPrimePos;
         long a;
+        // set a
         if (maxPrimePos <= 0) {
             a = 2;
             at(primeRef.home(), () -> {
@@ -472,17 +471,21 @@ public class Squares {
                 }
                 b++;
             }
+
+            // next prime found
             if (prime > 0) {
                 count++;
                 final long fPrime = a;
                 final int c = count;
                 at(primeRef.home(), () -> {
+                    // add found prime, if not already added by another thread
                     synchronized (LOCK_PRIMES) {
                         if (primeRef.get().size() <= c) {
                             primeRef.get().add(c, fPrime);
                         }
                     }
                 });
+                // get actualized primes-array
                 myPrimes = primeRef.get();
                 maxPrimePos = myPrimes.size() - 1;
                 if (x <= maxPrimePos) {
