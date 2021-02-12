@@ -54,6 +54,12 @@ public class Squares {
             }
         }
 
+        if (t > 1) {
+            async(() -> {
+                findPrimeNumber(m*i);
+            });
+        }
+
         // i iterations of computation
         for (int currentIteration = 0; currentIteration < i; currentIteration++) {
 
@@ -65,54 +71,62 @@ public class Squares {
             finish(() -> {
                 int startVal = 0;
                 int stopVal = n * n;
-                double place0workload = 1;
-                if (p > 1) {
-                    place0workload = 1;
-                }
-                int blockSize = (int) (n * n / p) + 1;  // anpassen
-                int placeNum = places().size() - 1;
+                int placeNum = 0;//places().size() - 1;
                 while (startVal < stopVal) {
-                    int workerBlockSize;
-                    if (placeNum == 0) {
-                        workerBlockSize = (int) (blockSize / Math.max((t * place0workload), 1)) + 1;
+
+                    int blockSize;
+                    if (t == 1) {
+                        blockSize = (n * n) / (p * t) + 1;
                     } else {
-                        workerBlockSize = (int) (blockSize / t) + 1;
+                        blockSize = (n * n) / ((p - 1) * t + (t/2)) + 1;
                     }
-                    //for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
-                    for (int worker = 0; worker < t; worker++) {
-                        final int thisStartVal = startVal + worker * workerBlockSize;
-                        final int thisBlockSize = workerBlockSize;
-                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
-                        asyncAt(place(placeNum), () -> {
-                            int x, y;
-                            long[] myZVal = new long[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
-                                x = (int) (pos / n);
-                                y = pos % n;
-                                for (int j = 0; j < n; j++) {
-                                    myZVal[pos - thisStartVal] += findPrimeNumber(a[x][y][j]);
-                                }
+                    int placeBlockSize;
+                    if (placeNum > 0 || t == 1) {
+                        placeBlockSize = t * blockSize / 2;
+                    } else {
+                        placeBlockSize = (t - 1) * blockSize / 2;
+                    }
+                    final int placeStartVal = startVal;
+                    final int placeStopVal = Math.min(startVal + placeBlockSize, stopVal);
+                    asyncAt(place(placeNum), () -> {
+                        long[] localZVal = new long[placeBlockSize];
+                        finish(() -> {
+                            int threadStartVal = placeStartVal;
+                            int threadBlockSize = placeBlockSize / (t * 4) + 1;
+                            int threadStopVal;
+                            while (threadStartVal < placeStopVal) {
+                                threadStopVal = Math.min(threadStartVal + threadBlockSize, placeStopVal);
+                                final int fstart = threadStartVal;
+                                final int fstop = threadStopVal;
+                                async(() -> {
+                                    int x, y;
+                                    for (int pos = fstart; pos < fstop; pos++) {
+                                        x = (int) (pos / n);
+                                        y = pos % n;
+                                        for (int j = 0; j < n; j++) {
+                                            if (primes.size() <= a[x][y][j]) {
+                                                localZVal[pos - placeStartVal] += findPrimeNumber(a[x][y][j]);
+                                            } else {
+                                                localZVal[pos - placeStartVal] += primes.get(a[x][y][j]);
+                                            }
+                                        }
+                                    }
+                                });
+                                threadStartVal += threadBlockSize;
+                                threadBlockSize = Math.max((int) (0.8*threadBlockSize), 1);
                             }
-                            final long[] remoteZVal = myZVal;
-                            asyncAt(zValRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
-                                    zValRef.get()[(int) (pos / n)][pos % n] = zValRef.get()[(int) (pos / n)][pos % n] + remoteZVal[pos - thisStartVal];
-                                }
-                            });
                         });
-                    }
-                    startVal += blockSize;
-                    placeNum = (placeNum - 1 + p) % p;
-                    if (placeNum == 0) {
-                        blockSize *= place0workload; // anpassen
-                    } else if (placeNum == 1) {
-                        blockSize /= place0workload;
-                    }
-                    /*if (startVal + (blockSize * p) > n * n) {
-                        blockSize = (int) ((n * n) - startVal) / p;
-                    }*/
-                    blockSize = Math.max(blockSize, 1);
+                        final long[] remoteZVal = localZVal;
+                        asyncAt(zValRef.home(), () -> {
+                            for (int pos = placeStartVal; pos < placeStopVal; pos++) {
+                                zValRef.get()[(int) (pos / n)][pos % n] = zValRef.get()[(int) (pos / n)][pos % n] + remoteZVal[pos - placeStartVal];
+                            }
+                        });
+                    });
+                    placeNum = (placeNum+1) % p;
+                    startVal += placeBlockSize;
                 }
+
             });
 
             long zValEnd = System.nanoTime();
@@ -124,47 +138,88 @@ public class Squares {
             finish(() -> {
                 int startVal = 0;
                 int stopVal = n * n;
-                int blockSize = n * (n / 2) / p; // anpassen
-                int placeNum = (places().size() > 1 ? 1 : 0);
+                int placeNum = 0;//places().size() - 1;
                 while (startVal < stopVal) {
-                    int workerBlockSize = (int) (blockSize / t) + 1;
-                    for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
-                        final int thisStartVal = worker;
-                        final int thisBlockSize = workerBlockSize;
-                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
-                        asyncAt(place(placeNum), () -> {
-                            int x, y;
-                            double[] myMeanVal = new double[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
-                                x = (int) (pos / n);
-                                y = pos % n;
-                                int counter = 0;
-                                for (int j = x - d; j <= x + d; j++) {
-                                    if (j >= 0 && j < n) {
-                                        for (int k = y - d; k <= y + d; k++) {
-                                            if (k >= 0 && k < n) {
-                                                counter++;
-                                                myMeanVal[pos - thisStartVal] += zValue[j][k];
+
+                    int blockSize;
+                    if (t == 1) {
+                        blockSize = (n * n) / (p * t) + 1;
+                    } else {
+                        blockSize = (n * n) / ((p - 1) * t + (t - 1)) + 1;
+                    }
+                    int placeBlockSize;
+                    if (placeNum > 0 || t == 1) {
+                        placeBlockSize = t * blockSize / 2;
+                    } else {
+                        placeBlockSize = (t - 1) * blockSize / 2;
+                    }
+                    final int placeStartVal = startVal;
+                    final int placeStopVal = Math.min(startVal + placeBlockSize, stopVal);
+
+                    asyncAt(place(placeNum), () -> {
+                        double[] localMeanVal = new double[placeBlockSize];
+                        finish(() -> {
+                            int threadStartVal = placeStartVal;
+                            int threadBlockSize = placeBlockSize / (t * 4) + 1;
+                            int threadStopVal;
+                            while (threadStartVal < placeStopVal) {
+                                threadStopVal = Math.min(threadStartVal + threadBlockSize, placeStopVal);
+                                final int fstart = threadStartVal;
+                                final int fstop = threadStopVal;
+                                async(() -> {
+                                    int x, y;
+                                    for (int pos = fstart; pos < fstop; pos++) {
+                                        x = (int) (pos / n);
+                                        y = pos % n;
+                                        int counter = 0;
+                                        for (int j = x - d; j <= x + d; j++) {
+                                            if (j >= 0 && j < n) {
+                                                for (int k = y - d; k <= y + d; k++) {
+                                                    if (k >= 0 && k < n) {
+                                                        counter++;
+                                                        localMeanVal[pos - placeStartVal] += zValue[j][k];
+                                                    }
+                                                }
                                             }
                                         }
+                                        localMeanVal[pos - placeStartVal] /= counter;
                                     }
-                                }
-                                myMeanVal[pos - thisStartVal] /= counter;
+                                });
+                                threadStartVal += threadBlockSize;
                             }
-                            final double[] remoteMeanVal = myMeanVal;
-                            asyncAt(meanValRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
-                                    meanValRef.get()[(int) (pos / n)][pos % n] = remoteMeanVal[pos - thisStartVal];
-                                }
-                            });
+                            /*for (int worker = 0; worker < t; worker++) {
+                                int localStartVal = placeStartVal + worker * threadBlockSize;
+                                int localStopVal = Math.min(placeStartVal + (worker + 1) * threadBlockSize, placeStopVal);
+                                async(() -> {
+                                    int x, y;
+                                    for (int pos = localStartVal; pos < localStopVal; pos++) {
+                                        x = (int) (pos / n);
+                                        y = pos % n;
+                                        int counter = 0;
+                                        for (int j = x - d; j <= x + d; j++) {
+                                            if (j >= 0 && j < n) {
+                                                for (int k = y - d; k <= y + d; k++) {
+                                                    if (k >= 0 && k < n) {
+                                                        counter++;
+                                                        localMeanVal[pos - placeStartVal] += zValue[j][k];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        localMeanVal[pos - placeStartVal] /= counter;
+                                    }
+                                });
+                            }*/
                         });
-                    }
-                    startVal += blockSize;
-                    placeNum = (placeNum + 1) % p;
-                    if (placeNum == 0) {
-                        blockSize *= 1; // anpassen
-                    }
-                    blockSize = Math.max(blockSize, 1);
+                        final double[] remoteMeanVal = localMeanVal;
+                        asyncAt(meanValRef.home(), () -> {
+                            for (int pos = placeStartVal; pos < placeStopVal; pos++) {
+                                meanValRef.get()[(int) (pos / n)][pos % n] = remoteMeanVal[pos - placeStartVal];
+                            }
+                        });
+                    });
+                    startVal += placeBlockSize;
+                    placeNum = (placeNum+1) % p;
                 }
             });
 
@@ -179,45 +234,81 @@ public class Squares {
             finish(() -> {
                 int startVal = 0;
                 int stopVal = n * n * n;
-                int blockSize = n * n * n / p;  // anpassen
-                int placeNum = (places().size() > 1 ? 1 : 0);
+                int placeNum = 0;//places().size() - 1;
+
                 while (startVal < stopVal) {
-                    int workerBlockSize = (int) (blockSize / t) + 1;
-                    for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
-                        final int thisStartVal = worker;
-                        final int thisBlockSize = workerBlockSize;
-                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
-                        asyncAt(place(placeNum), () -> {
-                            int[] myA = new int[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
+                    int blockSize;
+                    int placeBlockSize;
+                    if (t == 1) {
+                        blockSize = (n * n * n) / (p * t) + 1;
+                    } else {
+                        blockSize = (n * n * n) / ((p - 1) * t + (t - 1)) + 1;
+                    }
+                    if (placeNum > 0 || t == 1) {
+                        placeBlockSize = t * blockSize / 2;
+                    } else {
+                        placeBlockSize = (t - 1) * blockSize / 2;
+                    }
+                    final int placeStartVal = startVal;
+                    final int placeStopVal = Math.min(startVal + placeBlockSize, stopVal);
+                    asyncAt(place(placeNum), () -> {
+                        int[] localA = new int[placeBlockSize];
+                        finish(() -> {
+                            int threadStartVal = placeStartVal;
+                            int threadBlockSize = placeBlockSize / (t * n) + 1;
+                            int threadStopVal;
+                            while (threadStartVal < placeStopVal) {
+                                threadStopVal = Math.min(threadStartVal + threadBlockSize, placeStopVal);
+                                final int fstart = threadStartVal;
+                                final int fstop = threadStopVal;
+                                async(() -> {
+                                    int x, y, z;
+                                    for (int pos = fstart; pos < fstop; pos++) {
+                                        x = (int) (pos / (n * n));
+                                        y = (int) ((pos / n) % n);
+                                        z = pos % n;
+
+                                        Random localRandom = new Random();
+                                        localRandom.setSeed((long) meanValue[x][y] + z);
+                                        // currentIteration is in range of 0..(i-1)
+                                        int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
+                                        localA[pos - placeStartVal] = localRandom.nextInt(bound) + 1;
+                                    }
+                                });
+                                threadStartVal += threadBlockSize;
+                            }
+                            /*for (int worker = 0; worker < t; worker++) {
+                                int localStartVal = placeStartVal + worker * blockSize;
+                                int localStopVal = Math.min(placeStartVal + (worker + 1) * blockSize, placeStopVal);
+                                async(() -> {
+                                    int x, y, z;
+                                    for (int pos = localStartVal; pos < localStopVal; pos++) {
+                                        x = (int) (pos / (n * n));
+                                        y = (int) ((pos / n) % n);
+                                        z = pos % n;
+
+                                        Random localRandom = new Random();
+                                        localRandom.setSeed((long) meanValue[x][y] + z);
+                                        // currentIteration is in range of 0..(i-1)
+                                        int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
+                                        localA[pos - placeStartVal] = localRandom.nextInt(bound) + 1;
+                                    }
+                                });
+                            }*/
+
+                        });
+                        final int[] remoteA = localA;
+                        asyncAt(aRef.home(), () -> {
+                            for (int pos = placeStartVal; pos < placeStopVal; pos++) {
                                 int x = (int) (pos / (n * n));
                                 int y = (int) ((pos / n) % n);
                                 int z = pos % n;
-
-                                Random localRandom = new Random();
-
-                                localRandom.setSeed((long) meanValue[x][y] + z);
-                                // currentIteration is in range of 0..(i-1)
-                                int bound = m + (int) (meanValue[x][y] / ((iteration + 1) * 50));
-                                myA[pos - thisStartVal] = localRandom.nextInt(bound) + 1;
+                                aRef.get()[x][y][z] = remoteA[pos - placeStartVal];
                             }
-                            final int[] remoteA = myA;
-                            asyncAt(aRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
-                                    int x = (int) (pos / (n * n));
-                                    int y = (int) ((pos / n) % n);
-                                    int z = pos % n;
-                                    aRef.get()[x][y][z] = remoteA[pos - thisStartVal];
-                                }
-                            });
                         });
-                    }
-                    startVal += blockSize;
-                    placeNum = (placeNum + 1) % p;
-                    if (placeNum == 0) {
-                        blockSize *= 1;
-                    }
-                    blockSize = Math.max(blockSize, 1);
+                    });
+                    placeNum = (placeNum +1) % p;
+                    startVal += placeBlockSize;
                 }
             });
 
@@ -268,7 +359,7 @@ public class Squares {
 
         finish(() -> {
             int startVal = 0;
-            int stopVal = n*n*n;
+            int stopVal = n * n * n;
             int placeNum = (places().size() > 1 ? 1 : 0);
             int blockSize = (int) n * n * n / (p);
             while (startVal < stopVal) {
@@ -379,6 +470,7 @@ public class Squares {
         long end = System.nanoTime();
         System.out.println("Process time=" + ((end - start) / 1E9D) + " sec");
 
+        System.out.println(primes + " Länge: " + primes.size());
     }
 
     // with ArrayList and GlobalRef
@@ -393,7 +485,7 @@ public class Squares {
         if (maxPrimePos <= 0) {
             a = 2;
             at(primeRef.home(), () -> {
-                synchronized (primeRef.get()) {
+                synchronized (LOCK_PRIMES) {
                     if (primeRef.get().size() <= 0) {
                         primeRef.get().add(0, 0l);
                     }
