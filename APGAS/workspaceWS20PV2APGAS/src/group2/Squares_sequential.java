@@ -54,6 +54,7 @@ public class Squares_sequential {
             long iterationStart = System.nanoTime();
 
             // compute zValue
+            long zValStart = System.nanoTime();
             for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     //zValue[x][y] = 0;
@@ -62,8 +63,19 @@ public class Squares_sequential {
                     }
                 }
             }
+            long zValEnd = System.nanoTime();
+            System.out.println("zValue : time=" + ((zValEnd - zValStart) / 1E9D) + " sec");
+
+            System.out.println("zValues: ");
+            for (int x = 0; x < n; x++) {
+                for (int y = 0; y < n; y++) {
+                    System.out.printf("%d%c ", zValue[x][y], (y < n - 1 ? ',' : ' '));
+                }
+                System.out.println();
+            }
 
             // compute meanValue
+            long meanValStart = System.nanoTime();
             for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     int counter = 0;
@@ -81,8 +93,11 @@ public class Squares_sequential {
                     meanValue[x][y] /= counter;
                 }
             }
+            long meanValEnd = System.nanoTime();
+            System.out.println("meanValue : time=" + ((meanValEnd - meanValStart) / 1E9D) + " sec");
 
             // compute new a array
+            long aStart = System.nanoTime();
             for (int x = 0; x < n; x++) {
                 for (int y = 0; y < n; y++) {
                     for (int z = 0; z < n; z++) {
@@ -93,12 +108,8 @@ public class Squares_sequential {
                     }
                 }
             }
-
-            // resize primes-Array for next iteration
-            /*int len = m + 1 + (int) ((n * primes[maxPrimePos]) / 50);
-            long[] temp = new long[len];
-            System.arraycopy(primes, 0, temp, 0, primes.length);
-            primes = temp;*/
+            long aEnd = System.nanoTime();
+            System.out.println("new a : time=" + ((aEnd - aStart) / 1E9D) + " sec");
 
             // output of meanValue - matrix
             if (verbose == 1) {
@@ -109,16 +120,17 @@ public class Squares_sequential {
                     System.out.println();
                 }
 
-                long iterationEnd = System.nanoTime();
-
-                System.out.println("Iteration " + currentIteration + " time=" + ((iterationEnd - iterationStart) / 1E9D) + " sec");
-                System.out.println();
             }
+            long iterationEnd = System.nanoTime();
+
+            System.out.println("Iteration " + currentIteration + " time=" + ((iterationEnd - iterationStart) / 1E9D) + " sec");
+            System.out.println();
         }
 
         // To Do: compute min- and max-value and positions in a and output them
 
-        //min = (int) primes[maxPrimePos] + 1;
+        long minMaxStart = System.nanoTime();
+
         min = (int) (primes.get(maxPrimePos) + 1);
         max = 0;
 
@@ -150,6 +162,9 @@ public class Squares_sequential {
                 }
             }
         }
+        long minMaxEnd = System.nanoTime();
+        System.out.println("Min- and Max-Values: time=" + ((minMaxEnd - minMaxStart) / 1E9D) + " sec");
+        System.out.println();
 
         System.out.println("Min=" + min + " " + minPos);
         System.out.println("Max=" + max + " " + maxPos);
