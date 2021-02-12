@@ -112,6 +112,7 @@ void debug(unsigned int* seams, int height, int numSeams) {
 //checked
 __global__
 void calculatePixelEnergies(unsigned char* inputData, unsigned int* pixelEnergies, int width, int height) {
+    //__shared__ unsigned int inputTile[blockHeight1+2][blockWidth1+2];
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int tx = threadIdx.x;
@@ -142,6 +143,8 @@ void calculateMinEnergySums(unsigned int* pixelEnergies, struct container* minEn
     int bx = blockIdx.x;
     int tx = threadIdx.x;
     int x = bx * blockWidth2 + tx;
+    //use "tiling"
+    __shared__ unsigned int tiledMinEnergySums[blockWidth2];
     if (x < width) {
         if (row == 0) {
             struct container newContainer;
@@ -149,13 +152,15 @@ void calculateMinEnergySums(unsigned int* pixelEnergies, struct container* minEn
             newContainer.xPos = x;
             minEnergySums[x] = newContainer;
         }else {
+            tiledMinEnergySums[tx] = minEnergySums[(row - 1) * width + x].value;
+            __syncthreads();
             struct container newContainer;
-            if (x == width - 1) { // rightmost pixel of a row
-                newContainer.value = pixelEnergies[row * width + x] + MIN(minEnergySums[(row - 1) * width + x - 1].value, minEnergySums[(row - 1) * width + x].value);
-            }else if (x == 0) { // leftmost pixel of a row
-                newContainer.value = pixelEnergies[row * width + x] + MIN(minEnergySums[(row - 1) * width + x].value, minEnergySums[(row - 1) * width + x + 1].value);
+            if (x == 0) { // leftmost pixel of a row
+                newContainer.value = pixelEnergies[row * width + x] + MIN(tiledMinEnergySums[tx], (tx + 1 < blockWidth2) ? tiledMinEnergySums[tx + 1] : minEnergySums[(row - 1) * width + x + 1].value);
+            }else if (x == width - 1) { // rightmost pixel of a row 
+                newContainer.value = pixelEnergies[row * width + x] + MIN((tx - 1 > 0) ? tiledMinEnergySums[tx - 1] : minEnergySums[(row - 1) * width + x - 1].value, tiledMinEnergySums[tx]);
             }else {
-                newContainer.value = pixelEnergies[row * width + x] + MIN(MIN(minEnergySums[(row - 1) * width + x - 1].value, minEnergySums[(row - 1) * width + x].value), minEnergySums[(row - 1) * width + x + 1].value);
+                newContainer.value = pixelEnergies[row * width + x] + MIN(MIN((tx - 1 > 0) ? tiledMinEnergySums[tx - 1] : minEnergySums[(row - 1) * width + x - 1].value, tiledMinEnergySums[tx]), (tx + 1 < blockWidth2) ? tiledMinEnergySums[tx + 1] : minEnergySums[(row - 1) * width + x + 1].value);
             }
             newContainer.xPos = x;
             minEnergySums[row * width + x] = newContainer;
@@ -288,23 +293,30 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < height; i++){
         calculateMinEnergySums << <numBlocks2, threadsPerBlock2 >> > (d_pixelEnergies, d_minEnergySums, width, i);
         cudaStatus = cudaDeviceSynchronize();
-        if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculatePixelEnergies failed: %s\n", cudaGetErrorString(cudaStatus)); }
+        if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculateMinEnergySums failed: %s\n", cudaGetErrorString(cudaStatus)); }
     }
-
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "calculateMinEnergySums launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaDeviceSynchronize after launch calculateMinEnergySums failed: %s\n", cudaGetErrorString(cudaStatus)); }
 
-    //calculate Seams
+    //calculate Seams schauen wegen k>width
     cudaStatus = cudaMemcpy(lastMinEnergySums, d_minEnergySums + width * (height - 1), lastMinEnergySumsSize_t, cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "Memory Copy d_minEnergySums -> lastMinEnergySums failed! ErrorCode %d: %s\n", cudaStatus, cudaGetErrorString(cudaStatus)); }
 
     //sort by value
     quicksortValue(lastMinEnergySums, 0, width - 1);
-    for (int i = 0; i < numSeams; i++) {
+    /*for (int i = 0; i < numSeams; i++) {
         seamsStart[i] = lastMinEnergySums[i].xPos;
+    }*/
+    int seamIndex = 0;
+    int minSumIndex = 0;
+    while (seamIndex < numSeams) {
+        seamsStart[seamIndex] = lastMinEnergySums[minSumIndex].xPos;
+        seamIndex++;
+        minSumIndex = (minSumIndex + 1) % width;
     }
+
     //sort by coordinate
     quicksortint(seamsStart, 0, numSeams - 1);
     cudaStatus = cudaMemcpy(d_seams + numSeams * (height - 1), seamsStart, seamStartSize_t, cudaMemcpyHostToDevice);
