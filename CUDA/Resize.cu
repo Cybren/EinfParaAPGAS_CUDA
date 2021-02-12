@@ -50,7 +50,7 @@ void quicksortValue(struct container* list, int left, int right) {
     }
 }
 
-//wuicksort for int
+//quicksort for int
 int partint(unsigned int list[], int left, int right) {
     unsigned int pivot = list[right];
     int x = (left - 1);
@@ -99,6 +99,11 @@ struct container minContainer(struct container container1, struct container cont
     return container1.value < container2.value ? container1 : container2;
 }
 
+__device__
+unsigned int absDevice (int a) {
+    return a < 0 ? (-a) : a;
+}
+
 __global__
 void debug(unsigned int* seams, int height, int numSeams) {
     for (int y = 0; y < height; y++){
@@ -109,10 +114,10 @@ void debug(unsigned int* seams, int height, int numSeams) {
     }
 }
 
-//checked
 __global__
 void calculatePixelEnergies(unsigned char* inputData, unsigned int* pixelEnergies, int width, int height) {
-    //__shared__ unsigned int inputTile[blockHeight1+2][blockWidth1+2];
+    //use "tiling"
+    __shared__ unsigned int inputTile[blockHeight1][blockWidth1 * 3];
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int tx = threadIdx.x;
@@ -123,21 +128,25 @@ void calculatePixelEnergies(unsigned char* inputData, unsigned int* pixelEnergie
     int actualY;
     int actualX;
     if (y < height && x < width) {
+        inputTile[ty][tx * 3] = inputData[(y * width + x) * 3];
+        inputTile[ty][tx * 3 + 1] = inputData[(y * width + x) * 3 + 1];
+        inputTile[ty][tx * 3 + 2] = inputData[(y * width + x) * 3 + 2];
+        __syncthreads();
         sum = 0;
         for (int offsetX = -1; offsetX < 2; offsetX++) {
             for (int offsetY = -1; offsetY < 2; offsetY++) {
                 actualY = MOD((y + offsetY), height);
                 actualX = MOD((x + offsetX), width);
-                sum += abs(inputData[(y * width + x) * 3] - inputData[(actualY * width + actualX) * 3])
-                    + abs(inputData[(y * width + x) * 3 + 1] - inputData[(actualY * width + actualX) * 3 + 1])
-                    + abs(inputData[(y * width + x) * 3 + 2] - inputData[(actualY * width + actualX) * 3 + 2]);
+                bool condition = ((tx + offsetX) < blockWidth1 && (tx + offsetX) > 0 && (ty + offsetY) < blockHeight1 && (ty + offsetY) > 0);
+                sum += absDevice((int)inputTile[ty][tx * 3] - (condition ? inputTile[ty + offsetY][(tx + offsetX) * 3] : inputData[(actualY * width + actualX) * 3]));
+                    +absDevice((int)inputTile[ty][tx * 3 + 1] - (condition ? inputTile[ty + offsetY][(tx + offsetX) * 3 + 1] : inputData[(actualY * width + actualX) * 3 + 1]));
+                    +absDevice((int)inputTile[ty][tx * 3 + 2] - (condition ? inputTile[ty + offsetY][(tx + offsetX) * 3 + 2] : inputData[(actualY * width + actualX) * 3 + 2]));
             }
         }
         pixelEnergies[y * width + x] = sum;
     }
 }
 
-//checked
 __global__
 void calculateMinEnergySums(unsigned int* pixelEnergies, struct container* minEnergySums, int width, int row) {
     int bx = blockIdx.x;
@@ -198,25 +207,14 @@ void increaseWidth(unsigned char *inputData, unsigned char *outputData, struct c
         int outputRow = threadNum * (inputWidth + numSeams) * 3;
         int inputRow = threadNum * inputWidth * 3;
         for (int x = 0; x < (inputWidth + numSeams); x++) {
-            /*bool condition = (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams);
+            bool condition = (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams);
             oldX = condition ? oldX: oldX + 1;
-            outputData[row + x * 3] = condition ? outputData[row + (x - 1) * 3] : inputData[inputRow + oldX * 3];
-            outputData[row + x * 3 + 1] = condition ? outputData[row + (x - 1) * 3 + 1] : inputData[inputRow + oldX * 3 + 1];
-            outputData[row + x * 3 + 2] = condition ? outputData[row + (x - 1) * 3 + 2] : inputData[inputRow + oldX * 3 + 2];
-            seamIndex = condition ? seamIndex + 1 : seamIndex;*/
-            //copy last pixel if oldX is at a point where a seam is 
-            if (x > 0 && oldX == seams[threadNum * numSeams + seamIndex] && seamIndex < numSeams) {
-                outputData[outputRow + x * 3] = outputData[outputRow + (x - 1) * 3];
-                outputData[outputRow + x * 3 + 1] = outputData[outputRow + (x - 1) * 3 + 1];
-                outputData[outputRow + x * 3 + 2] = outputData[outputRow + (x - 1) * 3 + 2];
-                seamIndex++;
-            }else {
-            //else just copy the pixel of the old picture
-                oldX++;
-                outputData[outputRow + x * 3] = inputData[inputRow + oldX * 3];
-                outputData[outputRow + x * 3 + 1] = inputData[inputRow + oldX * 3 + 1];
-                outputData[outputRow + x * 3 + 2] = inputData[inputRow + oldX * 3 + 2];
-            }
+            //copy last pixel if oldX is at a point where a seam is else just copy the pixel of the old picture
+            //no branch divergence
+            outputData[outputRow + x * 3] = condition ? outputData[outputRow + (x - 1) * 3] : inputData[inputRow + oldX * 3];
+            outputData[outputRow + x * 3 + 1] = condition ? outputData[outputRow + (x - 1) * 3 + 1] : inputData[inputRow + oldX * 3 + 1];
+            outputData[outputRow + x * 3 + 2] = condition ? outputData[outputRow + (x - 1) * 3 + 2] : inputData[inputRow + oldX * 3 + 2];
+            seamIndex = condition ? seamIndex + 1 : seamIndex;
         }
     }
 }
@@ -235,7 +233,6 @@ int main(int argc, char* argv[]) {
     //host
     int width = input->width;
     int height = input->height;
-
 
     size_t inputDataSize_t = sizeof(unsigned char) * width * height * 3;
     size_t outputDataSize_t = sizeof(unsigned char) * (width + numSeams)* height * 3;
@@ -306,9 +303,6 @@ int main(int argc, char* argv[]) {
 
     //sort by value
     quicksortValue(lastMinEnergySums, 0, width - 1);
-    /*for (int i = 0; i < numSeams; i++) {
-        seamsStart[i] = lastMinEnergySums[i].xPos;
-    }*/
     int seamIndex = 0;
     int minSumIndex = 0;
     while (seamIndex < numSeams) {
@@ -325,7 +319,7 @@ int main(int argc, char* argv[]) {
     //start kernel3 calcSeams
     dim3 threadsPerBlock3(blocksize3);
     dim3 numBlocks3(ceil(numSeams/ (double)blocksize3));
-    printf("\n%d %d\n", threadsPerBlock3.x, numBlocks3.x);
+
     calcSeams<<<numBlocks3, threadsPerBlock3 >>>(d_minEnergySums, d_seams, width, height, numSeams);
 
     cudaStatus = cudaGetLastError();
@@ -336,7 +330,9 @@ int main(int argc, char* argv[]) {
     //start kernel4 increaseWidth
     dim3 threadsPerBlock4(blocksize4);
     dim3 numBlocks4(ceil(height / (double)blocksize4));
+
     increaseWidth<<<numBlocks4, threadsPerBlock4>>>(d_inputData, d_outputData, d_minEnergySums, d_seams, width, height, numSeams);
+
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "increaseWidth launch failed: %s\n", cudaGetErrorString(cudaStatus)); }
     cudaStatus = cudaDeviceSynchronize();
