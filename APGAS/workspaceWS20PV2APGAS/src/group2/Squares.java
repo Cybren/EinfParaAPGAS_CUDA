@@ -82,10 +82,11 @@ public class Squares {
                     for (int worker = 0; worker < t; worker++) {
                         final int thisStartVal = startVal + worker * workerBlockSize;
                         final int thisBlockSize = workerBlockSize;
+                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
                         asyncAt(place(placeNum), () -> {
                             int x, y;
                             long[] myZVal = new long[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                 x = (int) (pos / n);
                                 y = pos % n;
                                 for (int j = 0; j < n; j++) {
@@ -94,7 +95,7 @@ public class Squares {
                             }
                             final long[] remoteZVal = myZVal;
                             asyncAt(zValRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < n * n; pos++) {
+                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                     zValRef.get()[(int) (pos / n)][pos % n] = zValRef.get()[(int) (pos / n)][pos % n] + remoteZVal[pos - thisStartVal];
                                 }
                             });
@@ -130,10 +131,11 @@ public class Squares {
                     for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
                         final int thisStartVal = worker;
                         final int thisBlockSize = workerBlockSize;
+                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
                         asyncAt(place(placeNum), () -> {
                             int x, y;
                             double[] myMeanVal = new double[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                 x = (int) (pos / n);
                                 y = pos % n;
                                 int counter = 0;
@@ -151,7 +153,7 @@ public class Squares {
                             }
                             final double[] remoteMeanVal = myMeanVal;
                             asyncAt(meanValRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                     meanValRef.get()[(int) (pos / n)][pos % n] = remoteMeanVal[pos - thisStartVal];
                                 }
                             });
@@ -184,9 +186,10 @@ public class Squares {
                     for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
                         final int thisStartVal = worker;
                         final int thisBlockSize = workerBlockSize;
+                        final int thisStopVal = Math.min(startVal + blockSize, stopVal);
                         asyncAt(place(placeNum), () -> {
                             int[] myA = new int[thisBlockSize];
-                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                            for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                 int x = (int) (pos / (n * n));
                                 int y = (int) ((pos / n) % n);
                                 int z = pos % n;
@@ -200,7 +203,7 @@ public class Squares {
                             }
                             final int[] remoteA = myA;
                             asyncAt(aRef.home(), () -> {
-                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                                for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                                     int x = (int) (pos / (n * n));
                                     int y = (int) ((pos / n) % n);
                                     int z = pos % n;
@@ -273,6 +276,7 @@ public class Squares {
                 for (int worker = startVal; (worker < startVal + blockSize) && (worker < stopVal); worker += workerBlockSize) {
                     final int thisStartVal = worker;
                     final int thisBlockSize = workerBlockSize;
+                    final int thisStopVal = Math.min(startVal + blockSize, stopVal);
                     asyncAt(place(placeNum), () -> {
                         int myMinVal = at(minRef.home(), () -> minRef.get().get());
                         int myMaxVal = at(maxRef.home(), () -> maxRef.get().get());
@@ -281,7 +285,7 @@ public class Squares {
                         ArrayList<Position> myMaxPos = new ArrayList<>();
                         boolean newMin = false;
                         boolean newMax = false;
-                        for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < stopVal; pos++) {
+                        for (int pos = thisStartVal; pos < (thisStartVal + thisBlockSize) && pos < thisStopVal; pos++) {
                             x = (int) (pos / (n * n));
                             y = (int) ((pos / n) % n);
                             z = pos % n;
